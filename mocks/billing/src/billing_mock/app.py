@@ -1,0 +1,57 @@
+"""In-memory mock of the billing API described by examples/billing.yaml."""
+
+from flask import Flask, jsonify, request
+
+app = Flask(__name__)
+
+_INVOICES: dict[str, list[dict[str, object]]] = {
+    "cust_1": [
+        {"id": "inv_1", "customer_id": "cust_1", "amount_cents": 4200},
+        {"id": "inv_2", "customer_id": "cust_1", "amount_cents": 1500},
+    ],
+}
+_TAX_IDS = {"cust_1": "TAX-CUST-1"}
+_next_invoice_id = 3
+
+
+@app.get("/healthz")
+def healthz():
+    return jsonify(status="ok")
+
+
+@app.get("/v1/invoices")
+def list_invoices():
+    customer_id = request.args.get("customerId")
+    if not customer_id:
+        return jsonify(error="customerId is required"), 400
+    invoices = _INVOICES.get(customer_id, [])
+    limit = request.args.get("limit", type=int)
+    if limit is not None:
+        invoices = invoices[:limit]
+    return jsonify(invoices=invoices)
+
+
+@app.get("/v1/customers/<customer_id>/tax-id")
+def get_tax_id(customer_id: str):
+    tax_id = _TAX_IDS.get(customer_id)
+    if tax_id is None:
+        return jsonify(error="unknown customer"), 404
+    return jsonify(customer_id=customer_id, tax_id=tax_id)
+
+
+@app.post("/v1/invoices")
+def create_invoice():
+    global _next_invoice_id
+    body = request.get_json(force=True, silent=True) or {}
+    customer_id = body.get("customer_id")
+    amount_cents = body.get("amount_cents")
+    if not customer_id or not isinstance(amount_cents, int):
+        return jsonify(error="customer_id and amount_cents are required"), 400
+    invoice = {
+        "id": f"inv_{_next_invoice_id}",
+        "customer_id": customer_id,
+        "amount_cents": amount_cents,
+    }
+    _next_invoice_id += 1
+    _INVOICES.setdefault(customer_id, []).append(invoice)
+    return jsonify(invoice), 201
