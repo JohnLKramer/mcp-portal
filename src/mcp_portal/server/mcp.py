@@ -8,12 +8,13 @@ message, and neither is retried by the client on its own initiative.
 from collections.abc import Mapping
 from typing import Any
 
+import httpx
 import jsonschema
 from mcp import types
 
 from mcp_portal.operations import Effect, Operation
 from mcp_portal.registry import ToolSet
-from mcp_portal.transports.http import HttpTransport
+from mcp_portal.transports.http import HttpTransport, RequestBuildError
 
 _ANNOTATIONS: dict[Effect, tuple[bool, bool, bool]] = {
     # effect: (read_only, destructive, idempotent)
@@ -76,7 +77,13 @@ class ToolInvoker:
         if transport is None:
             return _error(f"no transport configured for upstream {operation.upstream!r}")
 
-        response = await transport.execute(operation, args)
+        try:
+            response = await transport.execute(operation, args)
+        except RequestBuildError as exc:
+            return _error(f"invalid arguments for {name!r}: {exc}")
+        except httpx.TimeoutException:
+            return _error(f"upstream {operation.upstream!r} timed out")
+
         return types.CallToolResult(
             content=[types.TextContent(type="text", text=response.text)],
             is_error=not (200 <= response.status < 300),

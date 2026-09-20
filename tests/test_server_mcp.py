@@ -3,7 +3,14 @@ import pytest
 from mcp import types
 
 from mcp_portal.config.models import UpstreamConfig
-from mcp_portal.operations import Effect, HttpBinding, Operation, Sensitivity
+from mcp_portal.operations import (
+    Effect,
+    HttpBinding,
+    Operation,
+    Parameter,
+    ParamLocation,
+    Sensitivity,
+)
 from mcp_portal.registry import ToolSet
 from mcp_portal.server.mcp import ToolInvoker, annotations_for, to_mcp_tool
 from mcp_portal.transports.http import HttpTransport
@@ -118,3 +125,57 @@ async def test_invalid_arguments_produce_an_actionable_error():
     result = await invoker(handler, operation).call("get", {})
     assert result.is_error is True
     assert "needed" in result.content[0].text
+
+
+@pytest.mark.anyio
+async def test_build_request_error_produces_an_actionable_error_not_an_exception():
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text="{}")
+
+    operation = Operation(
+        id="get_invoice",
+        upstream="billing",
+        name="get_invoice",
+        title="Get invoice",
+        description="Get an invoice by id.",
+        group_tags=(),
+        effect=Effect.READ_ONLY,
+        sensitivity=Sensitivity.NORMAL,
+        input_schema={
+            "type": "object",
+            "properties": {"id": {"type": "string"}},
+            "required": ["id"],
+        },
+        binding=HttpBinding(
+            method="GET",
+            path="/v1/invoices/{id}",
+            parameters=(
+                Parameter(
+                    arg="id",
+                    location=ParamLocation.PATH,
+                    wire_name="id",
+                    required=True,
+                    schema={"type": "string"},
+                ),
+            ),
+        ),
+    )
+
+    # "" satisfies the {"type": "string"} JSON Schema, but build_request rejects an
+    # empty path parameter because it would collapse the route segment.
+    result = await invoker(handler, operation).call("get_invoice", {"id": ""})
+    assert result.is_error is True
+    assert "invalid arguments" in result.content[0].text
+
+
+@pytest.mark.anyio
+async def test_upstream_timeout_produces_an_error_result_not_an_exception():
+    async def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("upstream took too long")
+
+    # Effect.ACTION is not retried, so a single timed-out attempt exhausts the
+    # retry budget immediately and HttpTransport.execute re-raises.
+    operation = op(effect=Effect.ACTION)
+    result = await invoker(handler, operation).call("list_invoices", {})
+    assert result.is_error is True
+    assert "timed out" in result.content[0].text
