@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+import httpx
 import pytest
 
 from mcp_portal.app import build_app
@@ -76,3 +77,32 @@ async def test_tool_schema_reaches_the_client(config_path: Path):
         assert tool.annotations.read_only_hint is True
     finally:
         await app.aclose()
+
+
+@pytest.mark.anyio
+async def test_the_configured_credential_reaches_the_outbound_request(
+    config_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    seen: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json={"invoices": []})
+
+    # build_app owns its clients, so the mock transport is injected at construction.
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr(
+        httpx,
+        "AsyncClient",
+        lambda **kw: real_client(transport=httpx.MockTransport(handler), **kw),
+    )
+
+    app = build_app(load_config(config_path))
+    try:
+        result = await app.invoker.call("billing_list_invoices", {"customer_id": "cus_1"})
+    finally:
+        await app.aclose()
+
+    assert result.is_error is False
+    # `${env:BILLING_KEY}` resolved to "sk-test" and the Bearer scheme was applied.
+    assert seen[0].headers["authorization"] == "Bearer sk-test"

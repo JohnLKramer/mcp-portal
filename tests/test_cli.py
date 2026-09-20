@@ -1,4 +1,5 @@
 import json
+import logging
 from pathlib import Path
 
 import pytest
@@ -67,6 +68,14 @@ def test_two_operations_declaring_one_tool_name_report_a_config_error(tmp_path: 
 def test_missing_config_file_exits_nonzero(tmp_path: Path, capsys):
     code = main(["validate", "--config", str(tmp_path / "absent.json")])
     assert code == 2
+
+
+def test_logging_setup_does_not_switch_on_httpx_request_logging(tmp_path: Path):
+    # httpx logs one line per request at INFO containing the full URL, query
+    # arguments included. Configuring the root logger would publish those.
+    main(["validate", "--config", str(write(tmp_path, CONFIG))])
+    assert logging.getLogger("mcp_portal").isEnabledFor(logging.INFO)
+    assert not logging.getLogger("httpx").isEnabledFor(logging.INFO)
 
 
 def test_serve_requires_a_config(capsys):

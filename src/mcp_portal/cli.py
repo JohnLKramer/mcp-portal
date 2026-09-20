@@ -29,8 +29,25 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _configure_logging() -> None:
+    """Turn on our own INFO logging without turning on anybody else's.
+
+    `logging.basicConfig(level=INFO)` configures the *root* logger, which also
+    switches on httpx's per-request line: one full URL per call, query string
+    included, straight to stderr with no redaction boundary. Model-supplied
+    argument values end up in those URLs, so the level is set on `mcp_portal`
+    alone and third-party loggers keep their own defaults.
+    """
+    logger = logging.getLogger("mcp_portal")
+    logger.setLevel(logging.INFO)
+    if not logger.handlers:
+        handler = logging.StreamHandler(sys.stderr)
+        handler.setFormatter(logging.Formatter("%(levelname)s:%(name)s:%(message)s"))
+        logger.addHandler(handler)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
-    logging.basicConfig(level=logging.INFO, stream=sys.stderr)
+    _configure_logging()
     args = _parser().parse_args(argv)
 
     try:
