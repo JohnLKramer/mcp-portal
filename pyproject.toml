@@ -8,7 +8,12 @@ version = "0.1.0"
 description = "An MCP sidecar for HTTP/gRPC services"
 readme = "README.md"
 requires-python = ">=3.14.7"
-dependencies = []
+dependencies = [
+    "mcp>=2.2.0,<3",
+    "pydantic>=2.13,<3",
+    "httpx>=0.28",
+    "ruamel.yaml>=0.19",
+]
 
 [dependency-groups]
 dev = [
@@ -19,3 +24,18 @@ dev = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/mcp_sidekit"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.mypy]
+python_version = "3.14"
+strict = true
