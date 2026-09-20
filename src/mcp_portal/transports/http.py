@@ -154,6 +154,16 @@ def _is_textual(content_type: str) -> bool:
     return content_type in _TEXTUAL_TYPES or content_type.endswith(_TEXTUAL_SUFFIXES)
 
 
+def _retry_delay_s(attempt: int, response: httpx.Response | None) -> float:
+    """How long to wait before the attempt after this one."""
+    if response is not None and response.status_code == 429:
+        header = response.headers.get("retry-after")
+        if header and header.isdigit():
+            return min(float(header), _RETRY_AFTER_CAP_S)
+    backoff = _BACKOFF_BASE_S * (2**attempt)
+    return random.uniform(0, backoff)  # noqa: S311 - jitter, not crypto
+
+
 @dataclass(frozen=True, slots=True)
 class HttpResponse:
     status: int
@@ -177,26 +187,33 @@ class HttpTransport:
         # Retrying a POST after a timeout is how a customer gets charged twice.
         return operation.effect in (Effect.READ_ONLY, Effect.IDEMPOTENT_WRITE)
 
-    def _budget_spent(self, started: float) -> bool:
-        """Whether the total wall-clock budget leaves room for another attempt.
-
-        `timeout_ms` bounds one attempt; `max_total_ms` bounds the retry loop as a
-        whole. Without this, three attempts plus backoff can hold a caller for
-        three times the timeout the operator thought they configured.
-        """
+    def _remaining_s(self, started: float) -> float | None:
+        """Seconds left in the total wall-clock budget, or None when it is unbounded."""
         budget_ms = self._upstream.max_total_ms
         if budget_ms is None:
-            return False
-        return (time.monotonic() - started) * 1000 >= budget_ms
+            return None
+        return budget_ms / 1000 - (time.monotonic() - started)
 
-    async def _sleep_for(self, attempt: int, response: httpx.Response | None) -> None:
-        if response is not None and response.status_code == 429:
-            header = response.headers.get("retry-after")
-            if header and header.isdigit():
-                await asyncio.sleep(min(float(header), _RETRY_AFTER_CAP_S))
-                return
-        backoff = _BACKOFF_BASE_S * (2**attempt)
-        await asyncio.sleep(random.uniform(0, backoff))  # noqa: S311 - jitter, not crypto
+    async def _wait_for_retry(
+        self, started: float, attempt: int, response: httpx.Response | None
+    ) -> bool:
+        """Wait before the next attempt; False when the budget cannot fund one.
+
+        `timeout_ms` bounds one attempt; `max_total_ms` bounds the retry loop as a
+        whole, so the wait and the attempt it buys have to fit in what is left of
+        the budget together. Asking only whether the budget was already spent let
+        a `Retry-After` of several seconds be slept off against a budget of a few
+        hundred milliseconds, and let three attempts plus backoff hold a caller
+        well past the total the operator configured.
+        """
+        delay = _retry_delay_s(attempt, response)
+        remaining = self._remaining_s(started)
+        # Below the gate `delay` is already strictly under `remaining`, so the
+        # sleep needs no separate clamp: the budget bounds it by construction.
+        if remaining is not None and delay + self._upstream.timeout_ms / 1000 > remaining:
+            return False
+        await asyncio.sleep(delay)
+        return True
 
     def _map(self, response: httpx.Response) -> HttpResponse:
         raw = response.content
@@ -238,15 +255,17 @@ class HttpTransport:
                     timeout=self._upstream.timeout_ms / 1000,
                 )
             except httpx.TimeoutException:
-                if attempt == attempts - 1 or self._budget_spent(started):
+                if attempt == attempts - 1 or not await self._wait_for_retry(
+                    started, attempt, None
+                ):
                     raise
-                await self._sleep_for(attempt, None)
                 continue
 
             retryable = last.status_code in RETRYABLE_STATUS or last.status_code == 429
-            if not retryable or attempt == attempts - 1 or self._budget_spent(started):
+            if not retryable or attempt == attempts - 1:
                 return self._map(last)
-            await self._sleep_for(attempt, last)
+            if not await self._wait_for_retry(started, attempt, last):
+                return self._map(last)
 
         assert last is not None
         return self._map(last)

@@ -1,4 +1,5 @@
 import asyncio
+import time
 
 import httpx
 import pytest
@@ -173,6 +174,65 @@ async def test_a_generous_total_budget_leaves_the_attempt_budget_intact():
 
     await transport(handler, timeout_ms=5000, max_total_ms=60000).execute(op(), {})
     assert calls == 3
+
+
+@pytest.mark.anyio
+async def test_the_total_time_budget_caps_the_elapsed_backoff_sequence():
+    calls = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        await asyncio.sleep(0.04)
+        return httpx.Response(503, text="down")
+
+    # Three attempts plus backoff would run past 250ms, so the loop has to stop
+    # one attempt short rather than noticing the overrun after the fact.
+    started = time.monotonic()
+    result = await transport(handler, timeout_ms=100, max_total_ms=250).execute(op(), {})
+    elapsed = time.monotonic() - started
+
+    assert calls == 2
+    assert result.status == 503
+    assert elapsed < 0.35  # max_total_ms + one timeout_ms, the tolerated overshoot
+
+
+@pytest.mark.anyio
+async def test_a_retry_after_longer_than_the_total_budget_is_not_slept_off():
+    calls = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(429, text="slow down", headers={"retry-after": "3"})
+
+    started = time.monotonic()
+    result = await transport(handler, timeout_ms=50, max_total_ms=100).execute(op(), {})
+    elapsed = time.monotonic() - started
+
+    assert calls == 1
+    assert result.status == 429
+    assert elapsed < 0.5  # not the 3s the header asked for
+
+
+@pytest.mark.anyio
+async def test_a_retry_after_inside_the_total_budget_is_still_honoured():
+    calls = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return httpx.Response(429, text="slow down", headers={"retry-after": "1"})
+        return httpx.Response(200, text="ok")
+
+    started = time.monotonic()
+    result = await transport(handler, timeout_ms=1000, max_total_ms=5000).execute(op(), {})
+    elapsed = time.monotonic() - started
+
+    assert calls == 2
+    assert result.status == 200
+    assert elapsed >= 1.0
 
 
 @pytest.mark.anyio
