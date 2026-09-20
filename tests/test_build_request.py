@@ -54,7 +54,7 @@ def test_empty_required_path_value_is_an_error():
         path="/v1/invoices/{id}",
         parameters=(p("invoice_id", ParamLocation.PATH, wire="id"),),
     )
-    with pytest.raises(RequestBuildError):
+    with pytest.raises(RequestBuildError, match="invoice_id"):
         build_request(binding, BASE, {"invoice_id": ""}, None)
 
 

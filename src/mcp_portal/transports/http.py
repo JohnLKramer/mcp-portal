@@ -46,7 +46,7 @@ class PreparedRequest:
     body: bytes | None
 
 
-def _encode_path_value(value: object) -> str:
+def _encode_path_value(arg: str, value: object) -> str:
     """Percent-encode against the RFC 3986 unreserved set.
 
     `safe=""` is the entire defence: it encodes `/`, `?`, `#` and `%`, so a value
@@ -56,7 +56,7 @@ def _encode_path_value(value: object) -> str:
     text = str(value)
     if text == "":
         raise RequestBuildError(
-            "empty value for a path parameter would collapse the segment and change the route"
+            f"empty value for path argument {arg!r} would collapse the segment and change the route"
         )
     return quote(text, safe="")
 
@@ -104,7 +104,9 @@ def build_request(
 
         match param.location:
             case ParamLocation.PATH:
-                path = path.replace("{" + param.wire_name + "}", _encode_path_value(value))
+                path = path.replace(
+                    "{" + param.wire_name + "}", _encode_path_value(param.arg, value)
+                )
             case ParamLocation.QUERY:
                 query.extend(_query_pairs(param.wire_name, value, param.explode))
             case ParamLocation.HEADER:

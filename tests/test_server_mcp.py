@@ -166,6 +166,7 @@ async def test_build_request_error_produces_an_actionable_error_not_an_exception
     result = await invoker(handler, operation).call("get_invoice", {"id": ""})
     assert result.is_error is True
     assert "invalid arguments" in result.content[0].text
+    assert "'id'" in result.content[0].text
 
 
 @pytest.mark.anyio
