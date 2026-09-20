@@ -180,3 +180,16 @@ async def test_upstream_timeout_produces_an_error_result_not_an_exception():
     result = await invoker(handler, operation).call("list_invoices", {})
     assert result.is_error is True
     assert "timed out" in result.content[0].text
+
+
+@pytest.mark.anyio
+async def test_a_non_timeout_transport_failure_produces_an_error_result():
+    async def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused")
+
+    # ConnectError is an httpx.RequestError but not a TimeoutException, so it only
+    # stays inside the tool result if the general supertype is caught.
+    result = await invoker(handler, op(effect=Effect.ACTION)).call("list_invoices", {})
+    assert result.is_error is True
+    assert "request failed" in result.content[0].text
+    assert "connection refused" in result.content[0].text

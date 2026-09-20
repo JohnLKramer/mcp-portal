@@ -7,6 +7,7 @@ boundary where model-supplied values become a real request.
 import asyncio
 import json
 import random
+import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -176,6 +177,18 @@ class HttpTransport:
         # Retrying a POST after a timeout is how a customer gets charged twice.
         return operation.effect in (Effect.READ_ONLY, Effect.IDEMPOTENT_WRITE)
 
+    def _budget_spent(self, started: float) -> bool:
+        """Whether the total wall-clock budget leaves room for another attempt.
+
+        `timeout_ms` bounds one attempt; `max_total_ms` bounds the retry loop as a
+        whole. Without this, three attempts plus backoff can hold a caller for
+        three times the timeout the operator thought they configured.
+        """
+        budget_ms = self._upstream.max_total_ms
+        if budget_ms is None:
+            return False
+        return (time.monotonic() - started) * 1000 >= budget_ms
+
     async def _sleep_for(self, attempt: int, response: httpx.Response | None) -> None:
         if response is not None and response.status_code == 429:
             header = response.headers.get("retry-after")
@@ -213,6 +226,7 @@ class HttpTransport:
 
         attempts = _MAX_ATTEMPTS if self._retryable(operation) else 1
         last: httpx.Response | None = None
+        started = time.monotonic()
 
         for attempt in range(attempts):
             try:
@@ -224,13 +238,13 @@ class HttpTransport:
                     timeout=self._upstream.timeout_ms / 1000,
                 )
             except httpx.TimeoutException:
-                if attempt == attempts - 1:
+                if attempt == attempts - 1 or self._budget_spent(started):
                     raise
                 await self._sleep_for(attempt, None)
                 continue
 
             retryable = last.status_code in RETRYABLE_STATUS or last.status_code == 429
-            if not retryable or attempt == attempts - 1:
+            if not retryable or attempt == attempts - 1 or self._budget_spent(started):
                 return self._map(last)
             await self._sleep_for(attempt, last)
 

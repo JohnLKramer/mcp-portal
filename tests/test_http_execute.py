@@ -1,9 +1,11 @@
+import asyncio
+
 import httpx
 import pytest
 
 from mcp_portal.config.models import UpstreamConfig
 from mcp_portal.operations import Effect, HttpBinding, Operation, Sensitivity
-from mcp_portal.transports.http import HttpTransport
+from mcp_portal.transports.http import Credential, HttpTransport
 
 
 def op(effect: Effect = Effect.READ_ONLY, method: str = "GET") -> Operation:
@@ -21,10 +23,10 @@ def op(effect: Effect = Effect.READ_ONLY, method: str = "GET") -> Operation:
     )
 
 
-def transport(handler, **upstream_kw) -> HttpTransport:
+def transport(handler, credential: Credential | None = None, **upstream_kw) -> HttpTransport:
     upstream = UpstreamConfig(base_url="https://api.example.com", **upstream_kw)
     client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
-    return HttpTransport(client=client, upstream=upstream, credential=None)
+    return HttpTransport(client=client, upstream=upstream, credential=credential)
 
 
 @pytest.mark.anyio
@@ -126,3 +128,61 @@ async def test_retries_are_bounded_at_three_attempts():
     result = await transport(handler).execute(op(), {})
     assert calls == 3
     assert result.status == 502
+
+
+@pytest.mark.anyio
+async def test_the_total_time_budget_stops_retrying_before_the_attempt_budget():
+    calls = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        await asyncio.sleep(0.05)
+        return httpx.Response(503, text="down")
+
+    # The per-attempt timeout leaves room for all three attempts; the total budget
+    # is spent by the end of the first one.
+    result = await transport(handler, timeout_ms=5000, max_total_ms=10).execute(op(), {})
+    assert calls == 1
+    assert result.status == 503
+
+
+@pytest.mark.anyio
+async def test_the_total_time_budget_stops_retrying_a_timeout():
+    calls = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        await asyncio.sleep(0.05)
+        raise httpx.ReadTimeout("upstream took too long")
+
+    with pytest.raises(httpx.ReadTimeout):
+        await transport(handler, timeout_ms=5000, max_total_ms=10).execute(op(), {})
+    assert calls == 1
+
+
+@pytest.mark.anyio
+async def test_a_generous_total_budget_leaves_the_attempt_budget_intact():
+    calls = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(502, text="bad gateway")
+
+    await transport(handler, timeout_ms=5000, max_total_ms=60000).execute(op(), {})
+    assert calls == 3
+
+
+@pytest.mark.anyio
+async def test_the_credential_header_reaches_the_outbound_request():
+    seen: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json={"ok": True})
+
+    credential = Credential(header="Authorization", value="Bearer sk-test")
+    await transport(handler, credential=credential).execute(op(), {})
+    assert seen[0].headers["authorization"] == "Bearer sk-test"
