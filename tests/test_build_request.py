@@ -154,6 +154,45 @@ def test_single_arg_body_is_sent_whole():
     assert json.loads(req.body or b"") == [1, 2]
 
 
+def test_missing_required_single_arg_body_is_an_error():
+    binding = HttpBinding(
+        method="POST",
+        path="/v1/bulk",
+        body=BodySpec(
+            content_type="application/json", schema={"type": "array"}, mode=BodyMode.SINGLE_ARG
+        ),
+    )
+    with pytest.raises(RequestBuildError):
+        build_request(binding, BASE, {}, None)
+
+
+def test_missing_required_non_object_body_is_an_error():
+    binding = HttpBinding(
+        method="POST",
+        path="/v1/bulk",
+        body=BodySpec(content_type="application/json", schema={"type": "array"}),
+    )
+    with pytest.raises(RequestBuildError):
+        build_request(binding, BASE, {}, None)
+
+
+def test_missing_required_flatten_body_property_is_an_error():
+    binding = HttpBinding(
+        method="POST",
+        path="/v1/invoices",
+        body=BodySpec(
+            content_type="application/json",
+            schema={
+                "type": "object",
+                "properties": {"amount": {"type": "integer"}, "currency": {"type": "string"}},
+                "required": ["amount", "currency"],
+            },
+        ),
+    )
+    with pytest.raises(RequestBuildError):
+        build_request(binding, BASE, {"amount": 100}, None)
+
+
 def test_credential_is_attached():
     binding = HttpBinding(method="GET", path="/v1/x")
     req = build_request(binding, BASE, {}, Credential(header="Authorization", value="Bearer t"))

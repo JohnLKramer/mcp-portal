@@ -100,11 +100,15 @@ def build_request(
     body: bytes | None = None
     if binding.body is not None:
         if binding.body.mode is BodyMode.SINGLE_ARG or binding.body.schema.get("type") != "object":
-            if "body" in arguments:
-                body = json.dumps(arguments["body"]).encode()
+            if "body" not in arguments:
+                raise RequestBuildError(f"missing required argument {'body'!r}")
+            body = json.dumps(arguments["body"]).encode()
         else:
             declared = set(binding.body.schema.get("properties", {}))
             body_fields = {k: v for k, v in arguments.items() if k in declared}
+            for name in binding.body.schema.get("required", []):
+                if name not in arguments or name not in body_fields:
+                    raise RequestBuildError(f"missing required argument {name!r}")
             body = json.dumps(body_fields).encode()
         if body is not None:
             headers["Content-Type"] = binding.body.content_type
