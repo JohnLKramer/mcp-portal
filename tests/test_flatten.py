@@ -1,7 +1,7 @@
 import pytest
 
-from mcp_sidekit.operations import BodyMode, BodySpec, HttpBinding, Parameter, ParamLocation
-from mcp_sidekit.sources.flatten import FlattenError, build_input_schema, resolve_arg_names
+from mcp_portal.operations import BodyMode, BodySpec, HttpBinding, Parameter, ParamLocation
+from mcp_portal.sources.flatten import FlattenError, build_input_schema, resolve_arg_names
 
 
 def param(arg: str, location: ParamLocation, required: bool = True, wire: str | None = None):

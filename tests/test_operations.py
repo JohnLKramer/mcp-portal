@@ -2,7 +2,7 @@ import dataclasses
 
 import pytest
 
-from mcp_sidekit.operations import (
+from mcp_portal.operations import (
     BodyMode,
     BodySpec,
     Effect,

@@ -8,7 +8,7 @@ name the upstream expects.
 
 from typing import Any
 
-from mcp_sidekit.operations import BodyMode, BodySpec, HttpBinding, Parameter
+from mcp_portal.operations import BodyMode, BodySpec, HttpBinding, Parameter
 
 SUPPORTED_CONTENT_TYPES = frozenset({"application/json"})
 

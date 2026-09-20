@@ -1,5 +1,5 @@
 def main() -> None:
-    print("mcp-sidekit")
+    print("mcp-portal")
 
 
 if __name__ == "__main__":
