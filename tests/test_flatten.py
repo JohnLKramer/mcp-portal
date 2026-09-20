@@ -114,3 +114,31 @@ def test_unsupported_content_type_is_an_error():
     with pytest.raises(FlattenError) as exc:
         build_input_schema(binding)
     assert "multipart/form-data" in str(exc.value)
+
+
+def test_empty_object_body_does_not_spuriously_reserve_body_name():
+    """Regression test: empty object body should not treat 'body' as reserved.
+
+    When a FLATTEN-mode body is an object type with no (or empty) properties,
+    _body_properties returns {} (falsy but not None). The old code would treat
+    'body' as a reserved name due to truthiness check, causing a query param
+    named 'body' to be spuriously renamed to 'query_body' even though no
+    'body' property exists in the output schema.
+    """
+    binding = HttpBinding(
+        method="POST",
+        path="/v1/test",
+        parameters=(param("body", ParamLocation.QUERY),),
+        body=BodySpec(
+            content_type="application/json",
+            schema={"type": "object"},  # no properties
+        ),
+    )
+    resolved = resolve_arg_names(binding)
+    # Parameter named 'body' should keep its name, not become 'query_body'
+    assert {p.arg for p in resolved.parameters} == {"body"}
+
+    schema = build_input_schema(binding)
+    # The schema should only have the query parameter, not an extra body argument
+    assert set(schema["properties"]) == {"body"}
+    assert schema["required"] == ["body"]

@@ -49,7 +49,9 @@ def resolve_arg_names(binding: HttpBinding) -> HttpBinding:
         counts[p.arg] = counts.get(p.arg, 0) + 1
 
     body_props = _body_properties(binding.body) if binding.body else None
-    body_names = set(body_props or ({BODY_ARG: {}} if binding.body else {}))
+    body_names = (
+        set(body_props) if body_props is not None else ({BODY_ARG} if binding.body else set())
+    )
     for name in body_names:
         counts[name] = counts.get(name, 0) + 1
 
