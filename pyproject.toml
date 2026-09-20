@@ -34,7 +34,10 @@ packages = ["src/mcp_portal"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q"
+addopts = "-q -m 'not integration'"
+markers = [
+    "integration: requires Docker; run explicitly with `-m integration`",
+]
 
 [tool.ruff]
 line-length = 100
