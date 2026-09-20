@@ -15,7 +15,7 @@ from fnmatch import fnmatch
 from typing import Any
 
 from mcp_portal.config.models import ClassificationRule, Config, MatchSpec, SelectionConfig
-from mcp_portal.naming import NamingOptions, generate_names
+from mcp_portal.naming import NameCollisionError, NamingOptions, generate_names
 from mcp_portal.operations import Operation
 
 
@@ -89,6 +89,41 @@ def _select(
     return kept, warnings
 
 
+def _assign_names(selected: Sequence[Operation], options: NamingOptions) -> tuple[Operation, ...]:
+    """Give every surviving operation a unique tool name.
+
+    An explicit `operations[].name` skips generation but not collision checking.
+    Publishing two tools under one name means `by_name` routes a call to whichever
+    operation happened to be last, while the annotations advertised for that name
+    came from the other one — so a collision is a load-time error, not a silent win.
+    """
+    ids = [op.id for op in selected]
+    duplicate_ids = sorted({i for i in ids if ids.count(i) > 1})
+    if duplicate_ids:
+        raise NameCollisionError(f"duplicate operation ids: {duplicate_ids}")
+
+    # Explicit names are reserved first, so a generated name never displaces one.
+    owner: dict[str, str] = {}
+    for op in sorted((o for o in selected if o.name), key=lambda o: o.id):
+        if op.name in owner:
+            raise NameCollisionError(
+                f"operations {owner[op.name]!r} and {op.id!r} both declare tool name {op.name!r}"
+            )
+        owner[op.name] = op.id
+
+    generated = generate_names([op for op in selected if not op.name], options)
+    for op_id in sorted(generated):
+        name = generated[op_id]
+        if name in owner:
+            raise NameCollisionError(
+                f"operation {op_id!r} generates tool name {name!r}, which operation "
+                f"{owner[name]!r} declares explicitly"
+            )
+        owner[name] = op_id
+
+    return tuple(dataclasses.replace(op, name=op.name or generated[op.id]) for op in selected)
+
+
 def build_toolset(operations: Iterable[Operation], config: Config) -> ToolSet:
     classified = _classify(list(operations), config.classification)
     selected, warnings = _select(classified, config.selection)
@@ -98,11 +133,8 @@ def build_toolset(operations: Iterable[Operation], config: Config) -> ToolSet:
         prefix_with_group_tag=config.naming.prefix_with_group_tag,
         prefix_with_upstream=config.naming.prefix_with_upstream,
     )
-    generated = generate_names(selected, options)
+    named = _assign_names(selected, options)
 
-    named = tuple(dataclasses.replace(op, name=op.name or generated[op.id]) for op in selected)
-    return ToolSet(
-        operations=named,
-        by_name={op.name: op for op in named},
-        warnings=tuple(warnings),
-    )
+    by_name = {op.name: op for op in named}
+    assert len(by_name) == len(named), "a tool name was shadowed despite the collision check"
+    return ToolSet(operations=named, by_name=by_name, warnings=tuple(warnings))

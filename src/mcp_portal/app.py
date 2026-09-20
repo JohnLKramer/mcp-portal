@@ -6,7 +6,8 @@ from dataclasses import dataclass
 import httpx
 
 from mcp_portal.auth.outbound import credential_for
-from mcp_portal.config.loader import LoadedConfig
+from mcp_portal.config.loader import ConfigError, LoadedConfig
+from mcp_portal.naming import NameCollisionError
 from mcp_portal.registry import build_toolset
 from mcp_portal.server.mcp import ToolInvoker
 from mcp_portal.sources.explicit import ExplicitSource
@@ -30,7 +31,12 @@ def build_app(loaded: LoadedConfig) -> App:
     config = loaded.config
 
     operations = list(ExplicitSource(config).operations())
-    toolset = build_toolset(operations, config)
+    try:
+        toolset = build_toolset(operations, config)
+    except NameCollisionError as exc:
+        # naming/ stays free of config imports, so the translation happens here —
+        # a duplicate id is a config problem and must exit like every other one.
+        raise ConfigError(str(exc)) from exc
 
     for warning in toolset.warnings:
         log.warning("%s", warning)

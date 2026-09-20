@@ -2,6 +2,7 @@ import pytest
 
 from mcp_portal.naming import (
     MAX_NAME_LENGTH,
+    NAME_PATTERN,
     NameCollisionError,
     NamingOptions,
     generate_names,
@@ -66,11 +67,23 @@ def test_long_names_are_truncated_and_suffixed_within_the_cap():
 
 
 def test_names_always_match_the_mcp_name_pattern():
-    import re
-
     names = generate_names([op("Weird Name!! 99"), op("x" * 100)], NamingOptions())
     for name in names.values():
-        assert re.fullmatch(r"[a-z0-9_]{1,64}", name), name
+        assert NAME_PATTERN.fullmatch(name), name
+
+
+def test_name_pattern_is_anchored():
+    assert NAME_PATTERN.search("Bad Name!") is None
+
+
+def test_an_id_with_no_nameable_characters_still_gets_a_name():
+    names = generate_names([op("!!!")], NamingOptions())
+    assert NAME_PATTERN.fullmatch(names["!!!"]), names["!!!"]
+
+
+def test_ids_that_both_normalize_away_get_distinct_names():
+    names = generate_names([op("!!!"), op("???")], NamingOptions())
+    assert names["!!!"] != names["???"]
 
 
 def test_unresolvable_collision_raises_rather_than_renaming_again():

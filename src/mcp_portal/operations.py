@@ -45,7 +45,9 @@ class Parameter:
     wire_name: str
     required: bool
     schema: Mapping[str, Any]
-    style: str = "form"
+    # Narrow on purpose: the HTTP transport only serializes `form`, so a wider
+    # type here would promise an interpretation no code performs.
+    style: Literal["form"] = "form"
     explode: bool = True
 
 

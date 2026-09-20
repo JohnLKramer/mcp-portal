@@ -9,6 +9,7 @@ from typing import Annotated, Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
+from mcp_portal.naming import NAME_PATTERN
 from mcp_portal.operations import BodyMode, Effect, ParamLocation, Sensitivity
 
 SECRET_REF_PATTERN = r"^\$\{(env|file):[^}]+\}$"
@@ -19,6 +20,22 @@ SecretRef = Annotated[str, StringConstraints(pattern=SECRET_REF_PATTERN)]
 A literal fails validation rather than warning, so configs are safe to commit by
 construction rather than by discipline.
 """
+
+ToolName = Annotated[str, StringConstraints(pattern=NAME_PATTERN.pattern)]
+"""An explicitly declared tool name. Held to what generate_names would produce.
+
+An explicit name is published verbatim, so it gets the same character set and
+length cap a generated one does rather than being trusted because an operator
+typed it.
+"""
+
+# A schemeless host such as `api.example.com` loads fine and then fails on every
+# call with httpx.UnsupportedProtocol. Requiring the scheme and a non-empty host
+# keeps that a load-time error.
+HTTP_URL_PATTERN = r"^https?://[^/?#\s]+"
+
+BaseUrl = Annotated[str, StringConstraints(pattern=HTTP_URL_PATTERN)]
+"""An absolute http(s) base URL. Kept a `str` so path joining stays unsurprising."""
 
 
 class Base(BaseModel):
@@ -44,7 +61,7 @@ class UpstreamAuthConfig(Base):
 
 class UpstreamConfig(Base):
     protocol: Literal["http"] = "http"
-    base_url: str
+    base_url: BaseUrl
     timeout_ms: int = Field(default=30000, gt=0)
     max_total_ms: int | None = Field(default=None, gt=0)
     max_response_bytes: int = Field(default=1024 * 1024, gt=0)
@@ -68,7 +85,9 @@ class ParameterEntry(Base):
     wire_name: str | None = None
     required: bool = False
     schema_: dict[str, Any] = Field(default_factory=lambda: {"type": "string"}, alias="schema")
-    style: str = "form"
+    # Only `form` is serialized. Declaring any other OpenAPI style would be
+    # accepted and then silently ignored, so the type refuses it instead.
+    style: Literal["form"] = "form"
     explode: bool = True
 
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
@@ -95,7 +114,7 @@ class OperationEntry(Base):
     upstream: str
     description: str
     title: str | None = None
-    name: str | None = None
+    name: ToolName | None = None
     group_tags: list[str] = Field(default_factory=list)
     effect: Effect | None = None
     sensitivity: Sensitivity | None = None

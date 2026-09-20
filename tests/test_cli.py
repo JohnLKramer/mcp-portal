@@ -41,6 +41,29 @@ def test_validate_reports_a_config_error_without_a_traceback(tmp_path: Path, cap
     assert "mode" in capsys.readouterr().err
 
 
+def test_duplicate_operation_ids_report_a_config_error_without_a_traceback(tmp_path: Path, capsys):
+    broken = CONFIG | {"operations": CONFIG["operations"] * 2}
+    code = main(["validate", "--config", str(write(tmp_path, broken))])
+    err = capsys.readouterr().err
+    assert code == 2
+    assert "configuration error:" in err
+    assert "list_invoices" in err
+
+
+def test_two_operations_declaring_one_tool_name_report_a_config_error(tmp_path: Path, capsys):
+    broken = CONFIG | {
+        "operations": [
+            CONFIG["operations"][0] | {"id": "a", "name": "invoices"},
+            CONFIG["operations"][0] | {"id": "b", "name": "invoices"},
+        ]
+    }
+    code = main(["validate", "--config", str(write(tmp_path, broken))])
+    err = capsys.readouterr().err
+    assert code == 2
+    assert "configuration error:" in err
+    assert "invoices" in err
+
+
 def test_missing_config_file_exits_nonzero(tmp_path: Path, capsys):
     code = main(["validate", "--config", str(tmp_path / "absent.json")])
     assert code == 2

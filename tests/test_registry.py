@@ -1,4 +1,9 @@
+import dataclasses
+
+import pytest
+
 from mcp_portal.config.models import Config
+from mcp_portal.naming import NameCollisionError
 from mcp_portal.operations import Effect, HttpBinding, Operation, Sensitivity
 from mcp_portal.registry import build_toolset
 
@@ -109,3 +114,42 @@ def test_a_selection_rule_matching_nothing_warns_but_does_not_fail():
 def test_naming_options_flow_from_config():
     ts = build_toolset([op("list")], cfg(naming={"prefix_with_group_tag": True}))
     assert ts.operations[0].name == "billing_list"
+
+
+def named(op_id: str, name: str) -> Operation:
+    return dataclasses.replace(op(op_id), name=name)
+
+
+def test_an_explicit_name_is_used_verbatim():
+    ts = build_toolset([named("list_invoices", "invoices")], cfg())
+    assert ts.operations[0].name == "invoices"
+    assert ts.by_name["invoices"].id == "list_invoices"
+
+
+def test_two_operations_sharing_an_explicit_name_collide():
+    ops = [named("a", "invoices"), named("b", "invoices")]
+    with pytest.raises(NameCollisionError) as exc:
+        build_toolset(ops, cfg())
+    assert "invoices" in str(exc.value)
+
+
+def test_an_explicit_name_colliding_with_a_generated_one_is_an_error():
+    # "b" would generate the name "b"; "a" claims it explicitly first.
+    ops = [named("a", "b"), op("b")]
+    with pytest.raises(NameCollisionError) as exc:
+        build_toolset(ops, cfg())
+    assert "'b'" in str(exc.value)
+
+
+def test_duplicate_operation_ids_collide_even_when_one_is_explicitly_named():
+    ops = [named("dup", "one"), op("dup")]
+    with pytest.raises(NameCollisionError) as exc:
+        build_toolset(ops, cfg())
+    assert "dup" in str(exc.value)
+
+
+def test_an_explicit_name_does_not_perturb_other_generated_names():
+    # "a" takes an explicit name, so "list_invoices" keeps its clean generated one
+    # instead of being suffixed against a name nothing publishes.
+    ts = build_toolset([named("a", "z"), op("list_invoices")], cfg())
+    assert {o.id: o.name for o in ts.operations} == {"a": "z", "list_invoices": "list_invoices"}

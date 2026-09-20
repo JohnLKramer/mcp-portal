@@ -22,7 +22,11 @@ _SUFFIX_LENGTH = 6
 _TRUNCATE_TO = MAX_NAME_LENGTH - _SUFFIX_LENGTH - 1
 
 _INVALID = re.compile(r"[^a-z0-9]+")
-NAME_PATTERN = re.compile(rf"[a-z0-9_]{{1,{MAX_NAME_LENGTH}}}")
+
+# Anchored, because this validates a whole tool name rather than finding one
+# inside a larger string. Config's explicit `operations[].name` is checked against
+# it, and generate_names asserts its own output against it.
+NAME_PATTERN = re.compile(rf"^[a-z0-9_]{{1,{MAX_NAME_LENGTH}}}$")
 
 
 class NameCollisionError(Exception):
@@ -41,6 +45,10 @@ def normalize(text: str) -> str:
     return _INVALID.sub("_", text.lower()).strip("_")
 
 
+def _suffix(op_id: str) -> str:
+    return hashlib.sha256(op_id.encode()).hexdigest()[:_SUFFIX_LENGTH]
+
+
 def _base_name(op: Operation, options: NamingOptions) -> str:
     if options.strategy == "method_path" and isinstance(op.binding, HttpBinding):
         core = f"{op.binding.method}_{op.binding.path}"
@@ -53,11 +61,12 @@ def _base_name(op: Operation, options: NamingOptions) -> str:
     if options.prefix_with_group_tag and op.group_tags:
         parts.append(op.group_tags[0])
     parts.append(core)
-    return normalize("_".join(parts))
 
-
-def _suffix(op_id: str) -> str:
-    return hashlib.sha256(op_id.encode()).hexdigest()[:_SUFFIX_LENGTH]
+    base = normalize("_".join(parts))
+    # An id of only invalid characters ("!!!") normalizes away to nothing, and an
+    # empty tool name cannot be published or called. The hash keeps it nameable
+    # and still deterministic.
+    return base or f"op_{_suffix(op.id)}"
 
 
 def _cap(name: str) -> str:
@@ -98,4 +107,5 @@ def generate_names(
     if unresolved:
         raise NameCollisionError(f"tool name collision survived suffixing: {sorted(unresolved)}")
 
+    assert all(NAME_PATTERN.fullmatch(n) for n in final), f"unpublishable tool name in {final}"
     return names

@@ -211,6 +211,7 @@
         "name": {
           "anyOf": [
             {
+              "pattern": "^[a-z0-9_]{1,64}$",
               "type": "string"
             },
             {
@@ -350,6 +351,7 @@
           "type": "object"
         },
         "style": {
+          "const": "form",
           "default": "form",
           "title": "Style",
           "type": "string"
@@ -467,6 +469,7 @@
           "type": "string"
         },
         "base_url": {
+          "pattern": "^https?://[^/?#\\s]+",
           "title": "Base Url",
           "type": "string"
         },

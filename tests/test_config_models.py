@@ -94,6 +94,39 @@ def test_static_mode_requires_a_value():
         Config.model_validate(payload)
 
 
+@pytest.mark.parametrize("name", ["List_Invoices", "list invoices", "list!", "", "a" * 65])
+def test_an_explicit_tool_name_outside_the_published_pattern_is_rejected(name: str):
+    payload = MINIMAL | {"operations": [MINIMAL["operations"][0] | {"name": name}]}
+    with pytest.raises(ValidationError) as exc:
+        Config.model_validate(payload)
+    assert "name" in str(exc.value)
+
+
+def test_a_well_formed_explicit_tool_name_is_accepted():
+    payload = MINIMAL | {"operations": [MINIMAL["operations"][0] | {"name": "invoices_2"}]}
+    assert Config.model_validate(payload).operations[0].name == "invoices_2"
+
+
+@pytest.mark.parametrize(
+    "base_url", ["api.example.com", "/v1", "ftp://api.example.com", "https://"]
+)
+def test_a_base_url_that_is_not_an_absolute_http_url_is_rejected(base_url: str):
+    payload = MINIMAL | {"upstreams": {"billing": {"base_url": base_url}}}
+    with pytest.raises(ValidationError) as exc:
+        Config.model_validate(payload)
+    assert "base_url" in str(exc.value)
+
+
+def test_a_parameter_style_other_than_form_is_rejected():
+    binding = MINIMAL["operations"][0]["binding"] | {
+        "parameters": [{"arg": "ids", "in": "query", "style": "spaceDelimited"}]
+    }
+    payload = MINIMAL | {"operations": [MINIMAL["operations"][0] | {"binding": binding}]}
+    with pytest.raises(ValidationError) as exc:
+        Config.model_validate(payload)
+    assert "style" in str(exc.value)
+
+
 def test_operation_referencing_an_unknown_upstream_is_rejected():
     payload = MINIMAL | {
         "operations": [
