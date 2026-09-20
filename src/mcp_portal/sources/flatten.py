@@ -66,8 +66,9 @@ def check_path_template(binding: HttpBinding) -> None:
     All three mismatches are invisible at call time, which is why they are errors
     at load time: a placeholder with no parameter is never substituted and ships a
     literal `{id}` to the upstream, a path parameter with no placeholder has its
-    value read and then dropped, and an optional path parameter produces one or
-    the other depending on what the caller happened to pass.
+    value read and then dropped, two parameters on one placeholder leave whichever
+    substitutes second with nowhere to go, and an optional path parameter produces
+    one of these depending on what the caller happened to pass.
     """
     placeholders = _PLACEHOLDER.findall(binding.path)
     repeated = sorted({p for p in placeholders if placeholders.count(p) > 1})
@@ -82,6 +83,12 @@ def check_path_template(binding: HttpBinding) -> None:
             raise FlattenError(
                 f"path parameter {p.arg!r} is optional, but a path parameter cannot be: "
                 f"omitting it would leave the literal placeholder '{{{p.wire_name}}}' in the URL"
+            )
+        if p.wire_name in declared:
+            raise FlattenError(
+                f"path parameters {declared[p.wire_name]!r} and {p.arg!r} share wire name "
+                f"{p.wire_name!r}, so only one of them can fill the placeholder "
+                f"'{{{p.wire_name}}}' and the other's value would be discarded"
             )
         declared[p.wire_name] = p.arg
 

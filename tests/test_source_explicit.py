@@ -227,6 +227,28 @@ def test_a_repeated_path_placeholder_is_a_config_error():
     assert "id" in str(exc.value)
 
 
+def test_two_path_parameters_sharing_a_wire_name_are_a_config_error():
+    with pytest.raises(ConfigError) as exc:
+        build(
+            [
+                entry(
+                    {
+                        "method": "GET",
+                        "path": "/v1/invoices/{id}",
+                        "parameters": [
+                            {"arg": "a", "in": "path", "wire_name": "id", "required": True},
+                            {"arg": "b", "in": "path", "wire_name": "id", "required": True},
+                        ],
+                    }
+                )
+            ]
+        )
+    message = str(exc.value)
+    assert "'a'" in message
+    assert "'b'" in message
+    assert "'id'" in message
+
+
 def test_a_matching_path_template_and_parameter_load_cleanly():
     (op,) = build(
         [
