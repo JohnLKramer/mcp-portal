@@ -1,0 +1,48 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mcp-portal"
+version = "0.1.0"
+description = "An MCP sidecar for HTTP/gRPC services"
+readme = "README.md"
+requires-python = ">=3.14.7"
+dependencies = [
+    "mcp>=2.2.0,<3",
+    "pydantic>=2.13,<3",
+    "httpx>=0.28",
+    "ruamel.yaml>=0.19",
+    "jsonschema>=4.26",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+    "ruff>=0.3.0",
+    "mypy>=1.8.0",
+    "pytest-cov>=7.1.0",
+    "anyio>=4.15.1",
+    "types-jsonschema>=4.26.0.20260518",
+]
+
+[project.scripts]
+mcp-portal = "mcp_portal.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mcp_portal"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.mypy]
+python_version = "3.14"
+strict = true

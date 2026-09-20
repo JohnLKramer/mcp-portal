@@ -1,0 +1,71 @@
+# A minimal mcp-portal configuration.
+# Validate with: uv run mcp-portal validate --config examples/billing.yaml
+
+version: "1"
+mode: configured
+
+server:
+  name: billing-portal
+  transport: stdio
+
+upstreams:
+  billing:
+    base_url: https://api.example.com
+    timeout_ms: 30000
+    auth:
+      outbound:
+        mode: static
+        header: Authorization
+        scheme: Bearer
+        # Secrets are references only. A literal here fails to load.
+        value: ${env:BILLING_API_KEY}
+
+naming:
+  strategy: operation_id
+  prefix_with_group_tag: true
+
+# Marks an operation sensitive so introspect-safe will not expose it in P2.
+classification:
+  - match: { ids: ["get_customer_tax_id"] }
+    sensitivity: sensitive
+
+operations:
+  - id: list_invoices
+    upstream: billing
+    description: List invoices for a customer.
+    group_tags: [billing]
+    binding:
+      method: GET
+      path: /v1/invoices
+      parameters:
+        - { arg: customer_id, in: query, wire_name: customerId, required: true,
+            schema: { type: string } }
+        - { arg: limit, in: query, required: false, schema: { type: integer } }
+
+  - id: get_customer_tax_id
+    upstream: billing
+    description: Get a customer's tax identifier.
+    group_tags: [billing]
+    binding:
+      method: GET
+      path: /v1/customers/{id}/tax-id
+      parameters:
+        - { arg: customer_id, in: path, wire_name: id, required: true,
+            schema: { type: string } }
+
+  - id: create_invoice
+    upstream: billing
+    description: Create an invoice.
+    group_tags: [billing]
+    binding:
+      method: POST
+      path: /v1/invoices
+      body:
+        content_type: application/json
+        mode: flatten
+        schema:
+          type: object
+          properties:
+            customer_id: { type: string }
+            amount_cents: { type: integer }
+          required: [customer_id, amount_cents]

@@ -1,0 +1,565 @@
+{
+  "$defs": {
+    "BindingEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol": {
+          "const": "http",
+          "default": "http",
+          "title": "Protocol",
+          "type": "string"
+        },
+        "method": {
+          "title": "Method",
+          "type": "string"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "parameters": {
+          "items": {
+            "$ref": "#/$defs/ParameterEntry"
+          },
+          "title": "Parameters",
+          "type": "array"
+        },
+        "body": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BodyEntry"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "method",
+        "path"
+      ],
+      "title": "BindingEntry",
+      "type": "object"
+    },
+    "BodyEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "content_type": {
+          "default": "application/json",
+          "title": "Content Type",
+          "type": "string"
+        },
+        "mode": {
+          "$ref": "#/$defs/BodyMode",
+          "default": "flatten"
+        },
+        "schema": {
+          "additionalProperties": true,
+          "title": "Schema",
+          "type": "object"
+        }
+      },
+      "required": [
+        "schema"
+      ],
+      "title": "BodyEntry",
+      "type": "object"
+    },
+    "BodyMode": {
+      "enum": [
+        "flatten",
+        "single_arg"
+      ],
+      "title": "BodyMode",
+      "type": "string"
+    },
+    "ClassificationRule": {
+      "additionalProperties": false,
+      "properties": {
+        "match": {
+          "$ref": "#/$defs/MatchSpec"
+        },
+        "effect": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Effect"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "sensitivity": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Sensitivity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "match"
+      ],
+      "title": "ClassificationRule",
+      "type": "object"
+    },
+    "Effect": {
+      "description": "What an operation does to upstream state. Derived from the HTTP method.",
+      "enum": [
+        "read_only",
+        "idempotent_write",
+        "action"
+      ],
+      "title": "Effect",
+      "type": "string"
+    },
+    "MatchSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Ids",
+          "type": "array"
+        },
+        "tags": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Tags",
+          "type": "array"
+        },
+        "upstream": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Upstream",
+          "type": "array"
+        },
+        "effect": {
+          "items": {
+            "$ref": "#/$defs/Effect"
+          },
+          "title": "Effect",
+          "type": "array"
+        }
+      },
+      "title": "MatchSpec",
+      "type": "object"
+    },
+    "NamingConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "strategy": {
+          "default": "operation_id",
+          "enum": [
+            "operation_id",
+            "method_path"
+          ],
+          "title": "Strategy",
+          "type": "string"
+        },
+        "prefix_with_group_tag": {
+          "default": false,
+          "title": "Prefix With Group Tag",
+          "type": "boolean"
+        },
+        "prefix_with_upstream": {
+          "default": false,
+          "title": "Prefix With Upstream",
+          "type": "boolean"
+        }
+      },
+      "title": "NamingConfig",
+      "type": "object"
+    },
+    "OperationEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "upstream": {
+          "title": "Upstream",
+          "type": "string"
+        },
+        "description": {
+          "title": "Description",
+          "type": "string"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Title"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z0-9_]{1,64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name"
+        },
+        "group_tags": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Group Tags",
+          "type": "array"
+        },
+        "effect": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Effect"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "sensitivity": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Sensitivity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "binding": {
+          "$ref": "#/$defs/BindingEntry"
+        }
+      },
+      "required": [
+        "id",
+        "upstream",
+        "description",
+        "binding"
+      ],
+      "title": "OperationEntry",
+      "type": "object"
+    },
+    "OutboundConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "default": "none",
+          "enum": [
+            "none",
+            "static"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "header": {
+          "default": "Authorization",
+          "title": "Header",
+          "type": "string"
+        },
+        "scheme": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "Bearer",
+          "title": "Scheme"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "pattern": "^\\$\\{(env|file):[^}]+\\}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Value"
+        }
+      },
+      "title": "OutboundConfig",
+      "type": "object"
+    },
+    "ParamLocation": {
+      "enum": [
+        "path",
+        "query",
+        "header"
+      ],
+      "title": "ParamLocation",
+      "type": "string"
+    },
+    "ParameterEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "arg": {
+          "title": "Arg",
+          "type": "string"
+        },
+        "in": {
+          "$ref": "#/$defs/ParamLocation"
+        },
+        "wire_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Wire Name"
+        },
+        "required": {
+          "default": false,
+          "title": "Required",
+          "type": "boolean"
+        },
+        "schema": {
+          "additionalProperties": true,
+          "title": "Schema",
+          "type": "object"
+        },
+        "style": {
+          "const": "form",
+          "default": "form",
+          "title": "Style",
+          "type": "string"
+        },
+        "explode": {
+          "default": true,
+          "title": "Explode",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "arg",
+        "in"
+      ],
+      "title": "ParameterEntry",
+      "type": "object"
+    },
+    "SelectionConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "include_tags": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Include Tags"
+        },
+        "exclude_tags": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Exclude Tags",
+          "type": "array"
+        },
+        "include_ids": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Include Ids"
+        },
+        "exclude_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Exclude Ids",
+          "type": "array"
+        }
+      },
+      "title": "SelectionConfig",
+      "type": "object"
+    },
+    "Sensitivity": {
+      "description": "Whether an operation's data is safe to expose. Never derived.",
+      "enum": [
+        "normal",
+        "sensitive"
+      ],
+      "title": "Sensitivity",
+      "type": "string"
+    },
+    "ServerConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "transport": {
+          "const": "stdio",
+          "default": "stdio",
+          "title": "Transport",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "ServerConfig",
+      "type": "object"
+    },
+    "UpstreamAuthConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "outbound": {
+          "$ref": "#/$defs/OutboundConfig"
+        }
+      },
+      "title": "UpstreamAuthConfig",
+      "type": "object"
+    },
+    "UpstreamConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol": {
+          "const": "http",
+          "default": "http",
+          "title": "Protocol",
+          "type": "string"
+        },
+        "base_url": {
+          "pattern": "^https?://[^/?#\\s]+",
+          "title": "Base Url",
+          "type": "string"
+        },
+        "timeout_ms": {
+          "default": 30000,
+          "exclusiveMinimum": 0,
+          "title": "Timeout Ms",
+          "type": "integer"
+        },
+        "max_total_ms": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Total Ms"
+        },
+        "max_response_bytes": {
+          "default": 1048576,
+          "exclusiveMinimum": 0,
+          "title": "Max Response Bytes",
+          "type": "integer"
+        },
+        "auth": {
+          "$ref": "#/$defs/UpstreamAuthConfig"
+        }
+      },
+      "required": [
+        "base_url"
+      ],
+      "title": "UpstreamConfig",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "const": "1",
+      "title": "Version",
+      "type": "string"
+    },
+    "mode": {
+      "const": "configured",
+      "title": "Mode",
+      "type": "string"
+    },
+    "server": {
+      "$ref": "#/$defs/ServerConfig"
+    },
+    "upstreams": {
+      "additionalProperties": {
+        "$ref": "#/$defs/UpstreamConfig"
+      },
+      "title": "Upstreams",
+      "type": "object"
+    },
+    "operations": {
+      "items": {
+        "$ref": "#/$defs/OperationEntry"
+      },
+      "title": "Operations",
+      "type": "array"
+    },
+    "classification": {
+      "items": {
+        "$ref": "#/$defs/ClassificationRule"
+      },
+      "title": "Classification",
+      "type": "array"
+    },
+    "selection": {
+      "$ref": "#/$defs/SelectionConfig"
+    },
+    "naming": {
+      "$ref": "#/$defs/NamingConfig"
+    }
+  },
+  "required": [
+    "version",
+    "mode",
+    "server",
+    "upstreams"
+  ],
+  "title": "mcp-portal configuration",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.mcp-portal.dev/config-v1.schema.json"
+}
