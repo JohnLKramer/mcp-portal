@@ -63,10 +63,12 @@ class ExplicitSource:
         binding = _binding(entry.binding)
 
         try:
-            effect = entry.effect or effect_for_method(binding.method)
+            derived_effect = effect_for_method(binding.method)
         except UnsupportedMethod:
-            # HEAD and OPTIONS are dropped at the source, in every mode.
+            # HEAD and OPTIONS (and any other unsupported method) are dropped at
+            # the source, in every mode — even when config sets an explicit effect.
             return None
+        effect = entry.effect or derived_effect
 
         try:
             resolved = resolve_arg_names(binding)

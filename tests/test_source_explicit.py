@@ -118,6 +118,23 @@ def test_head_operations_are_never_exposed():
     )
 
 
+def test_head_operations_are_never_exposed_even_with_an_explicit_effect():
+    assert (
+        build(
+            [
+                {
+                    "id": "probe",
+                    "upstream": "billing",
+                    "description": "Probe.",
+                    "effect": "read_only",
+                    "binding": {"method": "HEAD", "path": "/v1/x"},
+                }
+            ]
+        )
+        == []
+    )
+
+
 def test_flatten_failure_surfaces_as_a_config_error():
     from mcp_portal.config.loader import ConfigError
 
