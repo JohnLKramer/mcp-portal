@@ -1,4 +1,5 @@
 import asyncio
+import random
 import time
 
 import httpx
@@ -177,7 +178,15 @@ async def test_a_generous_total_budget_leaves_the_attempt_budget_intact():
 
 
 @pytest.mark.anyio
-async def test_the_total_time_budget_caps_the_elapsed_backoff_sequence():
+async def test_the_total_time_budget_caps_the_elapsed_backoff_sequence(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    # Backoff is full jitter (random.uniform(0, backoff)); pin it to its max so
+    # the gate's decision doesn't depend on which delay a given run happens to
+    # draw. Without this, a small first delay can leave enough budget for a
+    # third attempt and the test flakes (~10% of runs).
+    monkeypatch.setattr(random, "uniform", lambda _low, high: high)
+
     calls = 0
 
     async def handler(request: httpx.Request) -> httpx.Response:
