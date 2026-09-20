@@ -57,16 +57,9 @@ class UpstreamConfig(Base):
         return self
 
 
-class HttpServerConfig(Base):
-    host: str = "127.0.0.1"
-    port: int = Field(default=8080, gt=0, le=65535)
-    path: str = "/mcp"
-
-
 class ServerConfig(Base):
     name: str
     transport: Literal["stdio"] = "stdio"
-    http: HttpServerConfig | None = None
 
 
 class ParameterEntry(Base):

@@ -120,30 +120,6 @@
       "title": "Effect",
       "type": "string"
     },
-    "HttpServerConfig": {
-      "additionalProperties": false,
-      "properties": {
-        "host": {
-          "default": "127.0.0.1",
-          "title": "Host",
-          "type": "string"
-        },
-        "port": {
-          "default": 8080,
-          "exclusiveMinimum": 0,
-          "maximum": 65535,
-          "title": "Port",
-          "type": "integer"
-        },
-        "path": {
-          "default": "/mcp",
-          "title": "Path",
-          "type": "string"
-        }
-      },
-      "title": "HttpServerConfig",
-      "type": "object"
-    },
     "MatchSpec": {
       "additionalProperties": false,
       "properties": {
@@ -463,17 +439,6 @@
           "default": "stdio",
           "title": "Transport",
           "type": "string"
-        },
-        "http": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/HttpServerConfig"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
         }
       },
       "required": [
