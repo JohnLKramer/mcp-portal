@@ -13,6 +13,7 @@ dependencies = [
     "pydantic>=2.13,<3",
     "httpx>=0.28",
     "ruamel.yaml>=0.19",
+    "jsonschema>=4.26",
 ]
 
 [dependency-groups]
@@ -22,6 +23,7 @@ dev = [
     "mypy>=1.8.0",
     "pytest-cov>=7.1.0",
     "anyio>=4.15.1",
+    "types-jsonschema>=4.26.0.20260518",
 ]
 
 [tool.hatch.build.targets.wheel]
