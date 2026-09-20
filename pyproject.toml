@@ -21,6 +21,7 @@ dev = [
     "ruff>=0.3.0",
     "mypy>=1.8.0",
     "pytest-cov>=7.1.0",
+    "anyio>=4.15.1",
 ]
 
 [tool.hatch.build.targets.wheel]

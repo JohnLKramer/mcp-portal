@@ -4,15 +4,28 @@
 boundary where model-supplied values become a real request.
 """
 
+import asyncio
 import json
+import random
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import quote, urlencode
 
-from mcp_portal.operations import BodyMode, HttpBinding, ParamLocation
+import httpx
+
+from mcp_portal.config.models import UpstreamConfig
+from mcp_portal.operations import BodyMode, Effect, HttpBinding, Operation, ParamLocation
 
 _CRLF = ("\r", "\n")
+
+RETRYABLE_STATUS = frozenset({502, 503, 504})
+_MAX_ATTEMPTS = 3
+_BACKOFF_BASE_S = 0.1
+_RETRY_AFTER_CAP_S = 10.0
+
+_TEXTUAL_SUFFIXES = ("+json", "+xml")
+_TEXTUAL_TYPES = frozenset({"application/json", "application/xml", "application/yaml"})
 
 
 class RequestBuildError(Exception):
@@ -122,3 +135,102 @@ def build_request(
         headers[credential.header] = credential.value
 
     return PreparedRequest(method=binding.method, url=url, headers=headers, body=body)
+
+
+def _is_textual(content_type: str) -> bool:
+    """Whether a response body is safe to inline as text.
+
+    An empty content type is treated as textual: httpx.MockTransport and many real
+    APIs omit it on small JSON bodies, and inlining a short unknown body is less
+    harmful than hiding a real one.
+    """
+    if not content_type:
+        return True
+    if content_type.startswith("text/"):
+        return True
+    return content_type in _TEXTUAL_TYPES or content_type.endswith(_TEXTUAL_SUFFIXES)
+
+
+@dataclass(frozen=True, slots=True)
+class HttpResponse:
+    status: int
+    text: str
+    truncated: bool
+    original_bytes: int
+
+
+class HttpTransport:
+    def __init__(
+        self,
+        client: httpx.AsyncClient,
+        upstream: UpstreamConfig,
+        credential: Credential | None,
+    ) -> None:
+        self._client = client
+        self._upstream = upstream
+        self._credential = credential
+
+    def _retryable(self, operation: Operation) -> bool:
+        # Retrying a POST after a timeout is how a customer gets charged twice.
+        return operation.effect in (Effect.READ_ONLY, Effect.IDEMPOTENT_WRITE)
+
+    async def _sleep_for(self, attempt: int, response: httpx.Response | None) -> None:
+        if response is not None and response.status_code == 429:
+            header = response.headers.get("retry-after")
+            if header and header.isdigit():
+                await asyncio.sleep(min(float(header), _RETRY_AFTER_CAP_S))
+                return
+        backoff = _BACKOFF_BASE_S * (2**attempt)
+        await asyncio.sleep(random.uniform(0, backoff))  # noqa: S311 - jitter, not crypto
+
+    def _map(self, response: httpx.Response) -> HttpResponse:
+        raw = response.content
+        content_type = response.headers.get("content-type", "").split(";")[0].strip()
+
+        # Binary is described, never inlined: an error path or a stray image
+        # endpoint must not be able to dump base64 into a context window.
+        if not _is_textual(content_type):
+            return HttpResponse(
+                status=response.status_code,
+                text=f"[{len(raw)} bytes of {content_type or 'unknown content type'}, not inlined]",
+                truncated=False,
+                original_bytes=len(raw),
+            )
+
+        cap = self._upstream.max_response_bytes
+        if len(raw) <= cap:
+            return HttpResponse(response.status_code, response.text, False, len(raw))
+        body = raw[:cap].decode(errors="replace")
+        marker = f"\n\n[truncated: {len(raw)} bytes total, {cap} shown]"
+        return HttpResponse(response.status_code, body + marker, True, len(raw))
+
+    async def execute(self, operation: Operation, arguments: dict[str, Any]) -> HttpResponse:
+        binding = operation.binding
+        assert isinstance(binding, HttpBinding)
+        request = build_request(binding, self._upstream.base_url, arguments, self._credential)
+
+        attempts = _MAX_ATTEMPTS if self._retryable(operation) else 1
+        last: httpx.Response | None = None
+
+        for attempt in range(attempts):
+            try:
+                last = await self._client.request(
+                    request.method,
+                    request.url,
+                    headers=request.headers,
+                    content=request.body,
+                    timeout=self._upstream.timeout_ms / 1000,
+                )
+            except httpx.TimeoutException:
+                if attempt == attempts - 1:
+                    raise
+                await self._sleep_for(attempt, None)
+                continue
+
+            retryable = last.status_code in RETRYABLE_STATUS or last.status_code == 429
+            if not retryable or attempt == attempts - 1:
+                return self._map(last)
+            await self._sleep_for(attempt, last)
+
+        assert last is not None
+        return self._map(last)
