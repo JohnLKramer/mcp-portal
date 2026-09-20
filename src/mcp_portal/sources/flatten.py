@@ -6,13 +6,37 @@ of the product. Flattening is presentation only: `Parameter.wire_name` retains t
 name the upstream expects.
 """
 
+import re
 from typing import Any
 
-from mcp_portal.operations import BodyMode, BodySpec, HttpBinding, Parameter
+from mcp_portal.operations import BodyMode, BodySpec, HttpBinding, Parameter, ParamLocation
 
 SUPPORTED_CONTENT_TYPES = frozenset({"application/json"})
 
 BODY_ARG = "body"
+
+_PLACEHOLDER = re.compile(r"\{([^{}]*)\}")
+
+# Composition and constraint keywords a flattened body schema would declare and
+# the flattened tool schema would not carry. Lifting `properties` and `required`
+# out of a body is lossless only when the body declares nothing else.
+DROPPED_BODY_KEYWORDS = (
+    "oneOf",
+    "anyOf",
+    "allOf",
+    "not",
+    "if",
+    "then",
+    "else",
+    "additionalProperties",
+    "unevaluatedProperties",
+    "patternProperties",
+    "propertyNames",
+    "dependentRequired",
+    "dependentSchemas",
+    "minProperties",
+    "maxProperties",
+)
 
 
 class FlattenError(Exception):
@@ -34,6 +58,53 @@ def _check_content_type(body: BodySpec | None) -> None:
             f"unsupported request body content type {body.content_type!r}; "
             f"P1 supports {sorted(SUPPORTED_CONTENT_TYPES)}"
         )
+
+
+def check_path_template(binding: HttpBinding) -> None:
+    """Reconcile `{...}` placeholders in the path with declared path parameters.
+
+    All three mismatches are invisible at call time, which is why they are errors
+    at load time: a placeholder with no parameter is never substituted and ships a
+    literal `{id}` to the upstream, a path parameter with no placeholder has its
+    value read and then dropped, and an optional path parameter produces one or
+    the other depending on what the caller happened to pass.
+    """
+    placeholders = _PLACEHOLDER.findall(binding.path)
+    repeated = sorted({p for p in placeholders if placeholders.count(p) > 1})
+    if repeated:
+        raise FlattenError(f"path {binding.path!r} repeats placeholder(s) {repeated}")
+
+    declared: dict[str, str] = {}
+    for p in binding.parameters:
+        if p.location is not ParamLocation.PATH:
+            continue
+        if not p.required:
+            raise FlattenError(
+                f"path parameter {p.arg!r} is optional, but a path parameter cannot be: "
+                f"omitting it would leave the literal placeholder '{{{p.wire_name}}}' in the URL"
+            )
+        declared[p.wire_name] = p.arg
+
+    unmatched = sorted(set(placeholders) - set(declared))
+    if unmatched:
+        raise FlattenError(
+            f"path {binding.path!r} has placeholder(s) {unmatched} with no path parameter to fill "
+            "them"
+        )
+
+    unplaced = sorted(declared[w] for w in set(declared) - set(placeholders))
+    if unplaced:
+        raise FlattenError(
+            f"path parameter(s) {unplaced} have no matching placeholder in path {binding.path!r}, "
+            "so their values would be read and discarded"
+        )
+
+
+def unsupported_body_keywords(body: BodySpec | None) -> list[str]:
+    """Keywords a flattened body schema declares that the tool schema will not carry."""
+    if body is None or _body_properties(body) is None:
+        return []
+    return [k for k in DROPPED_BODY_KEYWORDS if k in body.schema]
 
 
 def resolve_arg_names(binding: HttpBinding) -> HttpBinding:

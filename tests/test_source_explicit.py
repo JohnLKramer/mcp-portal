@@ -1,5 +1,8 @@
+import logging
+
 import pytest
 
+from mcp_portal.config.loader import ConfigError
 from mcp_portal.config.models import Config
 from mcp_portal.operations import Effect, Sensitivity
 from mcp_portal.sources.explicit import ExplicitSource
@@ -136,8 +139,6 @@ def test_head_operations_are_never_exposed_even_with_an_explicit_effect():
 
 
 def test_flatten_failure_surfaces_as_a_config_error():
-    from mcp_portal.config.loader import ConfigError
-
     with pytest.raises(ConfigError):
         build(
             [
@@ -156,3 +157,128 @@ def test_flatten_failure_surfaces_as_a_config_error():
                 }
             ]
         )
+
+
+def entry(binding: dict, op_id: str = "get") -> dict:
+    return {"id": op_id, "upstream": "billing", "description": "Get.", "binding": binding}
+
+
+def test_a_path_placeholder_with_no_parameter_is_a_config_error():
+    with pytest.raises(ConfigError) as exc:
+        build([entry({"method": "GET", "path": "/v1/invoices/{id}"})])
+    assert "'id'" in str(exc.value)
+
+
+def test_a_path_parameter_with_no_placeholder_is_a_config_error():
+    with pytest.raises(ConfigError) as exc:
+        build(
+            [
+                entry(
+                    {
+                        "method": "GET",
+                        "path": "/v1/invoices",
+                        "parameters": [
+                            {"arg": "invoice_id", "in": "path", "wire_name": "id", "required": True}
+                        ],
+                    }
+                )
+            ]
+        )
+    assert "invoice_id" in str(exc.value)
+
+
+def test_an_optional_path_parameter_is_a_config_error():
+    with pytest.raises(ConfigError) as exc:
+        build(
+            [
+                entry(
+                    {
+                        "method": "GET",
+                        "path": "/v1/invoices/{id}",
+                        "parameters": [
+                            {
+                                "arg": "invoice_id",
+                                "in": "path",
+                                "wire_name": "id",
+                                "required": False,
+                            }
+                        ],
+                    }
+                )
+            ]
+        )
+    assert "invoice_id" in str(exc.value)
+    assert "{id}" in str(exc.value)
+
+
+def test_a_repeated_path_placeholder_is_a_config_error():
+    with pytest.raises(ConfigError) as exc:
+        build(
+            [
+                entry(
+                    {
+                        "method": "GET",
+                        "path": "/v1/{id}/child/{id}",
+                        "parameters": [{"arg": "id", "in": "path", "required": True}],
+                    }
+                )
+            ]
+        )
+    assert "id" in str(exc.value)
+
+
+def test_a_matching_path_template_and_parameter_load_cleanly():
+    (op,) = build(
+        [
+            entry(
+                {
+                    "method": "GET",
+                    "path": "/v1/invoices/{id}",
+                    "parameters": [
+                        {"arg": "invoice_id", "in": "path", "wire_name": "id", "required": True}
+                    ],
+                }
+            )
+        ]
+    )
+    assert op.binding.path == "/v1/invoices/{id}"
+
+
+def body_entry(schema: dict) -> dict:
+    return entry(
+        {
+            "method": "POST",
+            "path": "/v1/invoices",
+            "body": {"content_type": "application/json", "mode": "flatten", "schema": schema},
+        },
+        op_id="create",
+    )
+
+
+PLAIN_BODY: dict = {
+    "type": "object",
+    "properties": {"amount": {"type": "integer"}},
+    "required": ["amount"],
+}
+
+
+def test_a_flattened_body_warns_about_constraints_it_cannot_carry(caplog):
+    with caplog.at_level(logging.WARNING, logger="mcp_portal"):
+        build([body_entry(PLAIN_BODY | {"additionalProperties": False})])
+    assert "additionalProperties" in caplog.text
+    assert "create" in caplog.text
+
+
+def test_a_plain_flattened_body_does_not_warn(caplog):
+    with caplog.at_level(logging.WARNING, logger="mcp_portal"):
+        build([body_entry(PLAIN_BODY)])
+    assert caplog.text == ""
+
+
+def test_a_single_arg_body_keeps_its_constraints_and_does_not_warn(caplog):
+    payload = body_entry(PLAIN_BODY | {"oneOf": [{"required": ["amount"]}]})
+    payload["binding"]["body"]["mode"] = "single_arg"
+    with caplog.at_level(logging.WARNING, logger="mcp_portal"):
+        (op,) = build([payload])
+    assert caplog.text == ""
+    assert "oneOf" in op.input_schema["properties"]["body"]

@@ -6,6 +6,7 @@ always synthesized from the binding, never hand-written, so both sources present
 identical tool schemas for identical bindings.
 """
 
+import logging
 from collections.abc import Iterable
 
 from mcp_portal.classify import UnsupportedMethod, effect_for_method
@@ -18,7 +19,15 @@ from mcp_portal.operations import (
     Parameter,
     Sensitivity,
 )
-from mcp_portal.sources.flatten import FlattenError, build_input_schema, resolve_arg_names
+from mcp_portal.sources.flatten import (
+    FlattenError,
+    build_input_schema,
+    check_path_template,
+    resolve_arg_names,
+    unsupported_body_keywords,
+)
+
+log = logging.getLogger("mcp_portal")
 
 
 def _binding(entry: BindingEntry) -> HttpBinding:
@@ -71,10 +80,24 @@ class ExplicitSource:
         effect = entry.effect or derived_effect
 
         try:
+            check_path_template(binding)
             resolved = resolve_arg_names(binding)
             input_schema = build_input_schema(binding)
         except FlattenError as exc:
             raise ConfigError(f"operation {entry.id!r}: {exc}") from exc
+
+        # A warning rather than an error: build_request still filters the body to
+        # declared properties, so this weakens the contract the operator wrote
+        # without widening what the tool can send.
+        dropped = unsupported_body_keywords(binding.body)
+        if dropped:
+            log.warning(
+                "operation %r: body schema keyword(s) %s are dropped when the body is "
+                "flattened, so the tool schema validates less than the body schema declares; "
+                "use body mode 'single_arg' to keep them",
+                entry.id,
+                dropped,
+            )
 
         return Operation(
             id=entry.id,
