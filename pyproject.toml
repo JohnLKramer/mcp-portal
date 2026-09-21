@@ -42,7 +42,10 @@ markers = [
 [tool.ruff]
 line-length = 100
 target-version = "py314"
-exclude = ["mocks"]
+# "docs" holds Python code fenced inside plan/spec markdown for human reading,
+# not source ruff should own; formatting it rewrites the plan out from under
+# whoever is executing it.
+exclude = ["mocks", "docs"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
