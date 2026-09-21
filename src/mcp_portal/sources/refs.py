@@ -32,7 +32,7 @@ def _pointer_lookup(root: Mapping[str, Any], pointer: str) -> Any:
         key = raw.replace("~1", "/").replace("~0", "~")
         try:
             node = node[int(key)] if isinstance(node, list) else node[key]
-        except (KeyError, IndexError, ValueError) as exc:
+        except (KeyError, IndexError, ValueError, TypeError) as exc:
             raise RefError(f"$ref pointer {pointer!r} does not resolve: {exc}") from exc
     return node
 
@@ -60,28 +60,31 @@ class RefResolver:
         self.warnings: list[str] = []
 
     def resolve(self) -> dict[str, Any]:
-        result = self._walk(self._root, chain=())
+        result = self._walk(self._root, chain=(), root=self._root)
         assert isinstance(result, dict)
         return result
 
-    def _walk(self, node: Any, chain: tuple[str, ...]) -> Any:
+    def _walk(self, node: Any, chain: tuple[str, ...], root: Mapping[str, Any]) -> Any:
         if isinstance(node, Mapping) and isinstance(node.get("$ref"), str):
-            return self._resolve_ref(node["$ref"], chain)
+            return self._resolve_ref(node["$ref"], chain, root)
         if isinstance(node, Mapping):
-            return {k: self._walk(v, chain) for k, v in node.items()}
+            return {k: self._walk(v, chain, root) for k, v in node.items()}
         if isinstance(node, list):
-            return [self._walk(v, chain) for v in node]
+            return [self._walk(v, chain, root) for v in node]
         return node
 
-    def _resolve_ref(self, ref: str, chain: tuple[str, ...]) -> Any:
+    def _resolve_ref(self, ref: str, chain: tuple[str, ...], root: Mapping[str, Any]) -> Any:
         if ref in chain:
             self.warnings.append(f"circular $ref {ref!r} replaced with an open object schema")
             return {"type": "object"}
 
         target, pointer = _split(ref)
-        root = self._external_document(target) if target else self._root
-        node = _pointer_lookup(root, pointer or "#")
-        return self._walk(node, chain + (ref,))
+        # A bare `#/...` ref found while walking an externally-fetched document
+        # must resolve against *that* document, not the top-level one — shared
+        # component files conventionally cross-reference each other this way.
+        new_root = self._external_document(target) if target else root
+        node = _pointer_lookup(new_root, pointer or "#")
+        return self._walk(node, chain + (ref,), new_root)
 
     def _external_document(self, target: str) -> Mapping[str, Any]:
         if not self._allow_external:

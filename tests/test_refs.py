@@ -119,3 +119,16 @@ def test_external_documents_are_fetched_once_and_cached():
     }
     RefResolver(doc, allow_external=True, fetch_external=fetch).resolve()
     assert calls == ["common.yaml"]
+
+
+def test_a_bare_ref_inside_an_external_document_resolves_against_that_document():
+    fetched = {"Foo": {"$ref": "#/Bar"}, "Bar": {"type": "integer"}}
+    doc = {"x": {"$ref": "common.yaml#/Foo"}}
+    resolver = RefResolver(doc, allow_external=True, fetch_external=lambda target: fetched)
+    assert resolver.resolve()["x"] == {"type": "integer"}
+
+
+def test_a_pointer_traversing_through_a_scalar_is_a_ref_error_not_a_crash():
+    doc = {"x": {"$ref": "#/foo/bar"}, "foo": "not a container"}
+    with pytest.raises(RefError):
+        RefResolver(doc, allow_external=False).resolve()
