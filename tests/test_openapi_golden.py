@@ -11,14 +11,13 @@ applies, so the one test that exercises posture calls into `registry`
 directly rather than assuming `OpenApiSource` filters by mode.
 """
 
-import logging
 from pathlib import Path
 
 import httpx
 import pytest
 
 from mcp_portal.config.models import Config
-from mcp_portal.operations import Operation
+from mcp_portal.operations import Operation, Sensitivity
 from mcp_portal.registry import apply_mode_posture
 from mcp_portal.sources.openapi import LoadedDocument, OpenApiSource, load_document
 from mcp_portal.sources.refs import RefError
@@ -79,6 +78,8 @@ def test_x_mcp_sensitive_and_non_read_only_operations_are_dropped_by_mode_postur
     # apply_mode_posture (registry.py), not OpenApiSource, is what enforces
     # introspect-safe's "read-only and non-sensitive only" rule.
     _, ops = _load("billing-3.1.yaml")
+    assert ops["cancel_invoice"].sensitivity is Sensitivity.SENSITIVE
+    assert ops["get_invoice"].sensitivity is Sensitivity.NORMAL
     postured = {op.id: op for op in apply_mode_posture(ops.values(), "introspect-safe")}
     assert "cancel_invoice" not in postured  # DELETE is idempotent_write, and also sensitive
     assert "list_invoices" in postured
@@ -93,14 +94,13 @@ def test_30_fixture_converts_nullable_and_boolean_exclusive_minimum():
     assert "minimum" not in amount
 
 
-def test_30_fixture_circular_ref_becomes_an_open_object_and_warns(caplog):
-    with caplog.at_level(logging.WARNING, logger="mcp_portal"):
-        loaded, ops = _load("billing-3.0.json")
+def test_30_fixture_circular_ref_becomes_an_open_object_and_warns():
+    loaded, ops = _load("billing-3.0.json")
     assert ops["create_invoice"].input_schema["properties"]["parent"] == {"type": "object"}
-    assert any("circular" in w for w in loaded.warnings)
+    assert any("circular" in w and "Invoice" in w for w in loaded.warnings)
 
 
-def test_external_ref_targeting_a_disallowed_host_is_rejected():
+def test_external_ref_is_rejected_by_default():
     doc_path = FIXTURES / "ssrf-attempt.json"
     doc_path.write_text(
         '{"openapi": "3.1.0", "servers": [{"url": "https://api.example.com"}], '
@@ -111,6 +111,6 @@ def test_external_ref_targeting_a_disallowed_host_is_rejected():
     try:
         with pytest.raises(RefError) as exc:
             build("ssrf-attempt.json")
-        assert "external" in str(exc.value)
+        assert "disabled by default" in str(exc.value)
     finally:
         doc_path.unlink()
