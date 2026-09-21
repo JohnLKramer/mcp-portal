@@ -11,6 +11,7 @@ from typing import Any
 
 import httpx
 from ruamel.yaml import YAML
+from ruamel.yaml.error import YAMLError
 
 
 class OpenApiError(Exception):
@@ -18,8 +19,12 @@ class OpenApiError(Exception):
 
 
 def parse_document(text: str, *, is_yaml: bool) -> dict[str, Any]:
+    """Parse JSON or YAML text and validate it contains an OpenAPI document."""
     if is_yaml:
-        data = YAML(typ="safe").load(text)
+        try:
+            data = YAML(typ="safe").load(text)
+        except YAMLError as exc:
+            raise OpenApiError(f"invalid YAML in OpenAPI document: {exc}") from exc
     else:
         try:
             data = json.loads(text)

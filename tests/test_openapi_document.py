@@ -29,6 +29,11 @@ def test_parse_document_rejects_invalid_json():
         parse_document("{not json", is_yaml=False)
 
 
+def test_parse_document_rejects_invalid_yaml():
+    with pytest.raises(OpenApiError):
+        parse_document("key: value\n  bad: [1,2\n", is_yaml=True)
+
+
 def test_parse_document_rejects_a_document_with_no_openapi_field():
     with pytest.raises(OpenApiError) as exc:
         parse_document("{}", is_yaml=False)
