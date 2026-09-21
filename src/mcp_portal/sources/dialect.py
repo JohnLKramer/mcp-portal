@@ -30,10 +30,16 @@ def convert_30_schema(schema: Any) -> Any:
             continue
         out[key] = convert_30_schema(value)
 
-    if schema.get("nullable") is True and "type" in out:
-        base = out["type"]
-        types = base if isinstance(base, list) else [base]
-        out["type"] = sorted({*types, "null"})
+    if schema.get("nullable") is True:
+        if "type" in out:
+            base = out["type"]
+            types = base if isinstance(base, list) else [base]
+            out["type"] = sorted({*types, "null"})
+        else:
+            # No sibling `type` to widen — most commonly a nullable `$ref`,
+            # the standard OpenAPI 3.0 workaround for nullable references.
+            # Wrapping in `anyOf` is the only way to add null without a type.
+            out = {"anyOf": [out, {"type": "null"}]}
 
     if schema.get("exclusiveMinimum") is True and "minimum" in out:
         out["exclusiveMinimum"] = out.pop("minimum")

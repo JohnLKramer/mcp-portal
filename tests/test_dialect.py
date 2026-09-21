@@ -61,3 +61,8 @@ def test_non_dict_non_list_values_pass_through_unchanged():
 def test_a_schema_with_none_of_the_30_isms_is_unchanged():
     schema = {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}
     assert convert_30_schema(schema) == schema
+
+
+def test_nullable_ref_is_wrapped_in_anyof_with_null():
+    schema = convert_30_schema({"$ref": "#/components/schemas/Address", "nullable": True})
+    assert schema == {"anyOf": [{"$ref": "#/components/schemas/Address"}, {"type": "null"}]}
