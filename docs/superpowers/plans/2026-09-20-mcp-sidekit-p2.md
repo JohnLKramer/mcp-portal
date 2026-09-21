@@ -631,14 +631,24 @@ def test_a_broken_pointer_is_a_ref_error():
 
 
 def test_a_direct_self_reference_is_replaced_with_an_open_object_and_warns():
-    doc = {"components": {"schemas": {"Node": {"type": "object", "properties": {"child": {}}}}}}
-    doc["components"]["schemas"]["Node"]["properties"]["child"] = {
-        "$ref": "#/components/schemas/Node"
+    # The cycle is only detectable once something *points at* Node — chain
+    # tracking follows $ref expansion, not raw document position, so an
+    # entry-point $ref is what puts "Node" on the chain before its own
+    # self-reference is reached.
+    doc = {
+        "components": {
+            "schemas": {
+                "Node": {
+                    "type": "object",
+                    "properties": {"child": {"$ref": "#/components/schemas/Node"}},
+                }
+            }
+        },
+        "x": {"$ref": "#/components/schemas/Node"},
     }
     resolver = RefResolver(doc, allow_external=False)
     resolved = resolver.resolve()
-    node = resolved["components"]["schemas"]["Node"]
-    assert node["properties"]["child"] == {"type": "object"}
+    assert resolved["x"]["properties"]["child"] == {"type": "object"}
     assert any("circular" in w for w in resolver.warnings)
 
 
