@@ -489,21 +489,35 @@ from typing import Any
 
 import httpx
 from ruamel.yaml import YAML
+from ruamel.yaml.error import YAMLError
 
 
 class OpenApiError(Exception):
     """Raised for any problem loading, parsing, or resolving an OpenAPI document."""
 
 
-def parse_document(text: str, *, is_yaml: bool) -> dict[str, Any]:
+def parse_document(
+    text: str, *, is_yaml: bool, require_openapi_field: bool = True
+) -> dict[str, Any]:
+    """Parse JSON or YAML text.
+
+    `require_openapi_field` is False for external `$ref` targets: a shared
+    component-schema fragment has no top-level `openapi` version field, only
+    the entry document does.
+    """
     if is_yaml:
-        data = YAML(typ="safe").load(text)
+        try:
+            data = YAML(typ="safe").load(text)
+        except YAMLError as exc:
+            raise OpenApiError(f"invalid YAML in OpenAPI document: {exc}") from exc
     else:
         try:
             data = json.loads(text)
         except json.JSONDecodeError as exc:
             raise OpenApiError(f"invalid JSON in OpenAPI document: {exc}") from exc
-    if not isinstance(data, dict) or "openapi" not in data:
+    if not isinstance(data, dict):
+        raise OpenApiError("not a mapping: expected a JSON/YAML object at the top level")
+    if require_openapi_field and "openapi" not in data:
         raise OpenApiError("not an OpenAPI document: missing top-level 'openapi' version field")
     return data
 
@@ -1663,7 +1677,9 @@ class LoadedDocument:
 
 def _fetch_external(target: str, base_dir: Path, client: httpx.Client) -> dict[str, Any]:
     text, is_yaml = fetch_text(target, base_dir, client)
-    return parse_document(text, is_yaml=is_yaml)
+    # An external $ref target is typically a component-schema fragment, not a
+    # full OpenAPI document — it has no top-level `openapi` version field.
+    return parse_document(text, is_yaml=is_yaml, require_openapi_field=False)
 
 
 def load_document(
@@ -1753,8 +1769,14 @@ class OpenApiSource:
             return None
 
         op_id = raw.operation_id or _default_id(raw)
-        description = raw.extensions.get("x-mcp-description") or raw.description or raw.summary or op_id
-        title = raw.extensions.get("x-mcp-title") or raw.summary or description.splitlines()[0]
+        # str(...) coerces whatever wins: an x-mcp-* extension is a raw document
+        # value of unknown type, and a non-string here must not crash the load —
+        # the same "one bad operation must not fail the whole load" principle
+        # that governs the FlattenError handling above.
+        description = str(
+            raw.extensions.get("x-mcp-description") or raw.description or raw.summary or op_id
+        )
+        title = str(raw.extensions.get("x-mcp-title") or raw.summary or next(iter(description.splitlines()), op_id))
         name = self._name_override(raw)
 
         return Operation(
