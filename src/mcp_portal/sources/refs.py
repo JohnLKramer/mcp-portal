@@ -64,7 +64,7 @@ class RefResolver:
         assert isinstance(result, dict)
         return result
 
-    def _walk(self, node: Any, chain: tuple[str, ...], root: Mapping[str, Any]) -> Any:
+    def _walk(self, node: Any, chain: tuple[tuple[int, str], ...], root: Mapping[str, Any]) -> Any:
         if isinstance(node, Mapping) and isinstance(node.get("$ref"), str):
             return self._resolve_ref(node["$ref"], chain, root)
         if isinstance(node, Mapping):
@@ -73,8 +73,14 @@ class RefResolver:
             return [self._walk(v, chain, root) for v in node]
         return node
 
-    def _resolve_ref(self, ref: str, chain: tuple[str, ...], root: Mapping[str, Any]) -> Any:
-        if ref in chain:
+    def _resolve_ref(
+        self, ref: str, chain: tuple[tuple[int, str], ...], root: Mapping[str, Any]
+    ) -> Any:
+        # Keyed on (which document, ref text): identical ref text can denote
+        # different targets in different documents once external refs cross
+        # into a shared file, so the ref string alone is not a safe cycle key.
+        key = (id(root), ref)
+        if key in chain:
             self.warnings.append(f"circular $ref {ref!r} replaced with an open object schema")
             return {"type": "object"}
 
@@ -84,7 +90,7 @@ class RefResolver:
         # component files conventionally cross-reference each other this way.
         new_root = self._external_document(target) if target else root
         node = _pointer_lookup(new_root, pointer or "#")
-        return self._walk(node, chain + (ref,), new_root)
+        return self._walk(node, chain + (key,), new_root)
 
     def _external_document(self, target: str) -> Mapping[str, Any]:
         if not self._allow_external:

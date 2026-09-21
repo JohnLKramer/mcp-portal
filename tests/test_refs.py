@@ -132,3 +132,17 @@ def test_a_pointer_traversing_through_a_scalar_is_a_ref_error_not_a_crash():
     doc = {"x": {"$ref": "#/foo/bar"}, "foo": "not a container"}
     with pytest.raises(RefError):
         RefResolver(doc, allow_external=False).resolve()
+
+
+def test_identical_ref_text_across_two_documents_is_not_a_false_cycle():
+    top = {
+        "components": {"schemas": {"Foo": {"$ref": "other.yaml#/Baz"}}},
+        "y": {"$ref": "#/components/schemas/Foo"},
+    }
+    external = {
+        "Baz": {"$ref": "#/components/schemas/Foo"},
+        "components": {"schemas": {"Foo": {"type": "string", "external": True}}},
+    }
+    resolver = RefResolver(top, allow_external=True, fetch_external=lambda target: external)
+    assert resolver.resolve()["y"] == {"type": "string", "external": True}
+    assert resolver.warnings == []
