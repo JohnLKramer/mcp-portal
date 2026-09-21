@@ -1,6 +1,7 @@
 """Wire a loaded config into a runnable application."""
 
 import logging
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -13,7 +14,7 @@ from mcp_portal.config.loader import (
     check_operation_headers,
     credential_headers_for,
 )
-from mcp_portal.config.models import Config
+from mcp_portal.config.models import HTTP_URL_PATTERN, Config
 from mcp_portal.naming import NameCollisionError
 from mcp_portal.operations import Effect, Operation
 from mcp_portal.registry import build_toolset
@@ -62,7 +63,17 @@ def _introspect(config: Config, base_dir: Path) -> tuple[list[Operation], dict[s
             for warning in loaded.warnings:
                 log.warning("upstream %r: %s", key, warning)
 
-            resolved_base_urls[key] = upstream.base_url or loaded.base_url
+            resolved = upstream.base_url or loaded.base_url
+            # `resolve_base_url` returns whatever the document's servers[] says,
+            # unvalidated — `model_copy` below skips pydantic validation entirely,
+            # so this is the only place a malformed (e.g. relative) document-derived
+            # URL is caught at load time instead of failing every call at runtime.
+            if not re.match(HTTP_URL_PATTERN, resolved):
+                raise ConfigError(
+                    f"upstream {key!r}: document server URL {resolved!r} is not an "
+                    "absolute http(s) URL"
+                )
+            resolved_base_urls[key] = resolved
             source = OpenApiSource(
                 key, loaded, include_deprecated=upstream.introspection.openapi.include_deprecated
             )
@@ -79,11 +90,14 @@ def build_app(loaded: LoadedConfig) -> App:
         introspected, resolved_base_urls = _introspect(config, loaded.base_dir)
 
     explicit = list(ExplicitSource(config).operations())
-    operations = merge_operations(introspected, explicit)
 
-    check_operation_headers(operations, credential_headers_for(config))
-
+    # All three steps can raise NameCollisionError — merge_operations rejects a
+    # duplicate id within operations[] itself (the same load error P1 always
+    # raised; merging must not let it silently become last-write-wins), and
+    # build_toolset still catches the introspected-vs-explicit case.
     try:
+        operations = merge_operations(introspected, explicit)
+        check_operation_headers(operations, credential_headers_for(config))
         toolset = build_toolset(operations, config)
     except NameCollisionError as exc:
         # naming/ stays free of config imports, so the translation happens here —

@@ -7,7 +7,7 @@ import httpx
 import pytest
 
 from mcp_portal.app import build_app
-from mcp_portal.config.loader import load_config
+from mcp_portal.config.loader import ConfigError, load_config
 
 FIXTURES = Path(__file__).parent / "fixtures" / "openapi"
 
@@ -165,6 +165,87 @@ async def test_build_app_merges_an_explicit_override_by_id(tmp_path: Path):
         assert tool.description == "Overridden description."
     finally:
         await app.aclose()
+
+
+@pytest.mark.anyio
+async def test_a_relative_document_server_url_fails_as_a_config_error(tmp_path: Path):
+    # billing.json's servers[] entry is replaced with a relative URL ("/v1"), the
+    # kind real OpenAPI documents legitimately declare. With no operator-set
+    # `base_url` to override it, this must fail at load time as a ConfigError,
+    # not sail through and blow up every call with httpx.UnsupportedProtocol.
+    shutil.copy(FIXTURES / "relative_servers.json", tmp_path / "relative_servers.json")
+    config_path = _write_config(
+        tmp_path,
+        {
+            "version": "1",
+            "mode": "introspect-safe",
+            "server": {"name": "s", "transport": "stdio"},
+            "upstreams": {
+                "billing": {"introspection": {"openapi": {"file": "relative_servers.json"}}}
+            },
+        },
+    )
+    with pytest.raises(ConfigError, match="not an absolute http"):
+        build_app(load_config(config_path))
+
+
+@pytest.mark.anyio
+async def test_mixed_introspected_and_explicit_only_upstreams_both_serve_tools(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # One upstream introspects an OpenAPI document; a second upstream has no
+    # introspection at all, only `base_url` and an explicit operation. Both
+    # must end up in the final tool set, and calling each tool must reach the
+    # correct upstream's transport (proving the two upstreams weren't merged
+    # onto a single base_url).
+    shutil.copy(FIXTURES / "billing.json", tmp_path / "billing.json")
+    config_path = _write_config(
+        tmp_path,
+        {
+            "version": "1",
+            "mode": "introspect-safe",
+            "server": {"name": "s", "transport": "stdio"},
+            "upstreams": {
+                "billing": {"introspection": {"openapi": {"file": "billing.json"}}},
+                "payments": {"base_url": "https://payments.example.com"},
+            },
+            "operations": [
+                {
+                    "id": "list_payments",
+                    "upstream": "payments",
+                    "description": "List payments.",
+                    "binding": {"method": "GET", "path": "/payments"},
+                }
+            ],
+        },
+    )
+
+    seen: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json={})
+
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr(
+        httpx,
+        "AsyncClient",
+        lambda **kw: real_client(transport=httpx.MockTransport(handler), **kw),
+    )
+
+    app = build_app(load_config(config_path))
+    try:
+        names = {t.name for t in app.invoker.tools()}
+        assert "list_invoices" in names
+        assert "list_payments" in names
+
+        await app.invoker.call("list_invoices", {})
+        await app.invoker.call("list_payments", {})
+    finally:
+        await app.aclose()
+
+    hosts = {str(request.url.host) for request in seen}
+    assert hosts == {"api.example.com", "payments.example.com"}
 
 
 @pytest.mark.anyio

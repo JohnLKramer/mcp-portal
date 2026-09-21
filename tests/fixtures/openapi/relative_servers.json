@@ -1,0 +1,14 @@
+{
+  "openapi": "3.1.0",
+  "servers": [{ "url": "/v1" }],
+  "paths": {
+    "/invoices": {
+      "get": {
+        "operationId": "list_invoices",
+        "summary": "List invoices.",
+        "tags": ["billing"],
+        "responses": {}
+      }
+    }
+  }
+}

@@ -1,3 +1,6 @@
+import pytest
+
+from mcp_portal.naming import NameCollisionError
 from mcp_portal.operations import Effect, HttpBinding, Operation, Sensitivity
 from mcp_portal.sources.merge import merge_operations
 
@@ -41,3 +44,9 @@ def test_no_introspected_operations_is_just_the_explicit_list():
 def test_no_explicit_operations_is_just_the_introspected_list():
     merged = merge_operations([op("a"), op("b")], [])
     assert [o.id for o in merged] == ["a", "b"]
+
+
+def test_a_duplicate_id_within_explicit_operations_is_a_name_collision():
+    with pytest.raises(NameCollisionError) as exc:
+        merge_operations([], [op("dup"), op("dup")])
+    assert "dup" in str(exc.value)
