@@ -175,6 +175,24 @@ class NamingConfig(Base):
     prefix_with_upstream: bool = False
 
 
+class LocalPrincipalConfig(Base):
+    """Raw `authorization_details`, parsed into domain objects by
+    `auth.principal.local_principal`. Kept as `list[dict]` here rather than
+    `config.policy.RequireConfig`'s strict model: a *presented* detail may
+    carry RFC 9396 type-specific extension fields the way a *required* one
+    must not (§5) — strict rejection is reserved for `require`."""
+
+    authorization_details: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class AuthConfig(Base):
+    local_principal: LocalPrincipalConfig = Field(default_factory=LocalPrincipalConfig)
+
+
+class PolicyFileConfig(Base):
+    file: str
+
+
 class Config(Base):
     version: Literal["1"]
     mode: Literal["configured", "introspect-safe", "introspect-unsafe"]
@@ -185,6 +203,8 @@ class Config(Base):
     classification: list[ClassificationRule] = Field(default_factory=list)
     selection: SelectionConfig = Field(default_factory=SelectionConfig)
     naming: NamingConfig = Field(default_factory=NamingConfig)
+    auth: AuthConfig = Field(default_factory=AuthConfig)
+    policy: PolicyFileConfig | None = None
 
     @model_validator(mode="after")
     def _operations_reference_known_upstreams(self) -> Self:

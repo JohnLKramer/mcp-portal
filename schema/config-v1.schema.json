@@ -1,5 +1,15 @@
 {
   "$defs": {
+    "AuthConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "local_principal": {
+          "$ref": "#/$defs/LocalPrincipalConfig"
+        }
+      },
+      "title": "AuthConfig",
+      "type": "object"
+    },
     "BindingEntry": {
       "additionalProperties": false,
       "properties": {
@@ -131,6 +141,22 @@
         "openapi"
       ],
       "title": "IntrospectionConfig",
+      "type": "object"
+    },
+    "LocalPrincipalConfig": {
+      "additionalProperties": false,
+      "description": "Raw `authorization_details`, parsed into domain objects by\n`auth.principal.local_principal`. Kept as `list[dict]` here rather than\n`config.policy.RequireConfig`'s strict model: a *presented* detail may\ncarry RFC 9396 type-specific extension fields the way a *required* one\nmust not (\u00a75) \u2014 strict rejection is reserved for `require`.",
+      "properties": {
+        "authorization_details": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": "Authorization Details",
+          "type": "array"
+        }
+      },
+      "title": "LocalPrincipalConfig",
       "type": "object"
     },
     "MatchSpec": {
@@ -431,6 +457,20 @@
       "title": "ParameterEntry",
       "type": "object"
     },
+    "PolicyFileConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "file": {
+          "title": "File",
+          "type": "string"
+        }
+      },
+      "required": [
+        "file"
+      ],
+      "title": "PolicyFileConfig",
+      "type": "object"
+    },
     "SelectionConfig": {
       "additionalProperties": false,
       "properties": {
@@ -637,6 +677,20 @@
     },
     "naming": {
       "$ref": "#/$defs/NamingConfig"
+    },
+    "auth": {
+      "$ref": "#/$defs/AuthConfig"
+    },
+    "policy": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PolicyFileConfig"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     }
   },
   "required": [
