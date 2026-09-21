@@ -11,7 +11,6 @@ from mcp_portal.auth.outbound import credential_for
 from mcp_portal.config.loader import (
     ConfigError,
     LoadedConfig,
-    check_operation_headers,
     credential_headers_for,
 )
 from mcp_portal.config.models import HTTP_URL_PATTERN, Config
@@ -57,27 +56,30 @@ def _introspect(config: Config, base_dir: Path) -> tuple[list[Operation], dict[s
                 loaded = load_document(
                     upstream.introspection.openapi, base_dir, upstream.base_url, client
                 )
+                for warning in loaded.warnings:
+                    log.warning("upstream %r: %s", key, warning)
+
+                resolved = upstream.base_url or loaded.base_url
+                # `resolve_base_url` returns whatever the document's servers[] says,
+                # unvalidated — `model_copy` below skips pydantic validation entirely,
+                # so this is the only place a malformed (e.g. relative) document-derived
+                # URL is caught at load time instead of failing every call at runtime.
+                if not re.match(HTTP_URL_PATTERN, resolved):
+                    raise ConfigError(
+                        f"upstream {key!r}: document server URL {resolved!r} is not an "
+                        "absolute http(s) URL"
+                    )
+                resolved_base_urls[key] = resolved
+
+                source = OpenApiSource(
+                    key,
+                    loaded,
+                    include_deprecated=upstream.introspection.openapi.include_deprecated,
+                    credential_headers=credential_headers_for(config),
+                )
+                introspected.extend(source.operations())
             except (OpenApiError, RefError) as exc:
                 raise ConfigError(f"upstream {key!r}: {exc}") from exc
-
-            for warning in loaded.warnings:
-                log.warning("upstream %r: %s", key, warning)
-
-            resolved = upstream.base_url or loaded.base_url
-            # `resolve_base_url` returns whatever the document's servers[] says,
-            # unvalidated — `model_copy` below skips pydantic validation entirely,
-            # so this is the only place a malformed (e.g. relative) document-derived
-            # URL is caught at load time instead of failing every call at runtime.
-            if not re.match(HTTP_URL_PATTERN, resolved):
-                raise ConfigError(
-                    f"upstream {key!r}: document server URL {resolved!r} is not an "
-                    "absolute http(s) URL"
-                )
-            resolved_base_urls[key] = resolved
-            source = OpenApiSource(
-                key, loaded, include_deprecated=upstream.introspection.openapi.include_deprecated
-            )
-            introspected.extend(source.operations())
     return introspected, resolved_base_urls
 
 
@@ -97,7 +99,6 @@ def build_app(loaded: LoadedConfig) -> App:
     # build_toolset still catches the introspected-vs-explicit case.
     try:
         operations = merge_operations(introspected, explicit)
-        check_operation_headers(operations, credential_headers_for(config))
         toolset = build_toolset(operations, config)
     except NameCollisionError as exc:
         # naming/ stays free of config imports, so the translation happens here —

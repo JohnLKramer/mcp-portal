@@ -7,6 +7,7 @@ import pytest
 from mcp_portal.config.models import OpenApiIntrospectionConfig
 from mcp_portal.operations import Effect, Sensitivity
 from mcp_portal.sources.openapi import OpenApiSource, load_document
+from mcp_portal.sources.openapi_document import OpenApiError
 from mcp_portal.sources.refs import RefError
 
 DOC = {
@@ -244,13 +245,13 @@ def test_an_external_ref_to_a_plain_component_fragment_resolves(tmp_path: Path):
 
     original_fetch_text = openapi_module.fetch_text
 
-    def fetch(target: str, base_dir, client) -> tuple[str, bool]:
+    def fetch(target: str, base_dir, client, **kwargs) -> tuple[str, bool]:
         # `fetch_text` is also used by `load_document` itself to read the entry
         # document ("openapi.json"), so only intercept the external ref target
         # and delegate everything else to the real implementation.
         if target == "https://trusted.example.com/common.yaml":
             return '{"Foo": {"type": "object", "properties": {"n": {"type": "integer"}}}}', False
-        return original_fetch_text(target, base_dir, client)
+        return original_fetch_text(target, base_dir, client, **kwargs)
 
     openapi_module.fetch_text = fetch
     try:
@@ -261,6 +262,61 @@ def test_an_external_ref_to_a_plain_component_fragment_resolves(tmp_path: Path):
     assert op.input_schema["properties"]["n"] == {"type": "integer"}
 
 
+def test_load_document_rejects_a_file_external_ref_that_escapes_the_config_dir(tmp_path: Path):
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    outside = tmp_path / "outside-secret.json"
+    outside.write_text('{"Foo": {"type": "string"}}')
+    doc = {
+        "openapi": "3.1.0",
+        "servers": [{"url": "https://api.example.com"}],
+        "paths": {
+            "/x": {
+                "post": {
+                    "operationId": "x",
+                    "requestBody": {
+                        "content": {
+                            "application/json": {"schema": {"$ref": "../outside-secret.json#/Foo"}}
+                        }
+                    },
+                    "responses": {},
+                }
+            }
+        },
+    }
+    write_doc(config_dir, doc)
+    config = OpenApiIntrospectionConfig(file="openapi.json", allow_external_refs=True)
+    with pytest.raises(OpenApiError) as exc:
+        load_document(config, config_dir, None, httpx.Client())
+    assert "outside-secret.json" in str(exc.value)
+
+
+def test_load_document_rejects_an_absolute_file_external_ref_target(tmp_path: Path):
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    outside = tmp_path / "outside-secret.json"
+    outside.write_text('{"Foo": {"type": "string"}}')
+    doc = {
+        "openapi": "3.1.0",
+        "servers": [{"url": "https://api.example.com"}],
+        "paths": {
+            "/x": {
+                "post": {
+                    "operationId": "x",
+                    "requestBody": {
+                        "content": {"application/json": {"schema": {"$ref": f"{outside}#/Foo"}}}
+                    },
+                    "responses": {},
+                }
+            }
+        },
+    }
+    write_doc(config_dir, doc)
+    config = OpenApiIntrospectionConfig(file="openapi.json", allow_external_refs=True)
+    with pytest.raises(OpenApiError):
+        load_document(config, config_dir, None, httpx.Client())
+
+
 def test_a_non_string_x_mcp_description_does_not_crash_the_load(tmp_path: Path):
     doc = {
         "openapi": "3.1.0",
@@ -269,3 +325,40 @@ def test_a_non_string_x_mcp_description_does_not_crash_the_load(tmp_path: Path):
     }
     (op,) = load(tmp_path, doc)
     assert op.description == "42"
+
+
+def test_an_operation_with_a_denylisted_header_parameter_is_dropped_with_a_warning(
+    tmp_path: Path, caplog
+):
+    doc = {
+        "openapi": "3.1.0",
+        "servers": [{"url": "https://api.example.com"}],
+        "paths": {
+            "/x": {
+                "get": {
+                    "operationId": "get_x",
+                    "parameters": [
+                        {"name": "Authorization", "in": "header", "schema": {"type": "string"}}
+                    ],
+                    "responses": {},
+                }
+            },
+            "/y": {"get": {"operationId": "get_y", "responses": {}}},
+        },
+    }
+    write_doc(tmp_path, doc)
+    config = OpenApiIntrospectionConfig(file="openapi.json")
+    loaded = load_document(config, tmp_path, None, httpx.Client())
+    with caplog.at_level(logging.WARNING, logger="mcp_portal"):
+        ops = {
+            o.id: o
+            for o in OpenApiSource(
+                "billing",
+                loaded,
+                include_deprecated=False,
+                credential_headers=frozenset({"authorization"}),
+            ).operations()
+        }
+    assert "get_x" not in ops
+    assert "get_y" in ops
+    assert "denylisted" in caplog.text

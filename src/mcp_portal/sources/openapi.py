@@ -17,6 +17,7 @@ from typing import Any
 import httpx
 
 from mcp_portal.classify import UnsupportedMethod, effect_for_method
+from mcp_portal.config.loader import is_denylisted
 from mcp_portal.config.models import OpenApiIntrospectionConfig
 from mcp_portal.naming import NAME_PATTERN
 from mcp_portal.operations import (
@@ -63,7 +64,7 @@ class LoadedDocument:
 
 
 def _fetch_external(target: str, base_dir: Path, client: httpx.Client) -> dict[str, Any]:
-    text, is_yaml = fetch_text(target, base_dir, client)
+    text, is_yaml = fetch_text(target, base_dir, client, require_containment=True)
     # An external $ref target is typically a component-schema fragment, not a
     # full OpenAPI document — it has no top-level `openapi` version field.
     return parse_document(text, is_yaml=is_yaml, require_openapi_field=False)
@@ -117,11 +118,17 @@ def _binding(raw: RawOperation) -> HttpBinding:
 
 class OpenApiSource:
     def __init__(
-        self, upstream_key: str, loaded: LoadedDocument, *, include_deprecated: bool
+        self,
+        upstream_key: str,
+        loaded: LoadedDocument,
+        *,
+        include_deprecated: bool,
+        credential_headers: frozenset[str] = frozenset(),
     ) -> None:
         self._upstream_key = upstream_key
         self._document = loaded.document
         self._include_deprecated = include_deprecated
+        self._credential_headers = credential_headers
 
     def operations(self) -> Iterable[Operation]:
         for raw in extract_raw_operations(
@@ -136,6 +143,19 @@ class OpenApiSource:
             return None
 
         binding = _binding(raw)
+        for param in binding.parameters:
+            if param.location is ParamLocation.HEADER and is_denylisted(
+                param.wire_name, self._credential_headers
+            ):
+                log.warning(
+                    "upstream %r: dropping %s %s: header parameter %r is denylisted",
+                    self._upstream_key,
+                    raw.method.upper(),
+                    raw.path,
+                    param.wire_name,
+                )
+                return None
+
         try:
             derived_effect = effect_for_method(binding.method)
         except UnsupportedMethod:

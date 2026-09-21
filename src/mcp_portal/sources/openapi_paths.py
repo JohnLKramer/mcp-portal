@@ -5,12 +5,16 @@ filtering rules unique to OpenAPI are testable without touching
 `operations.py`'s types at all.
 """
 
+import logging
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
 from mcp_portal.classify import EXPOSED_METHODS
+from mcp_portal.sources.openapi_document import OpenApiError
+
+log = logging.getLogger("mcp_portal")
 
 _SLUG_INVALID = re.compile(r"[^a-z0-9]+")
 _PARAM_LOCATIONS = frozenset({"path", "query", "header"})
@@ -89,27 +93,42 @@ def extract_raw_operations(
     document: Mapping[str, Any], *, include_deprecated: bool = False
 ) -> list[RawOperation]:
     operations: list[RawOperation] = []
-    paths = document.get("paths", {})
+    paths = document.get("paths") or {}
+    if not isinstance(paths, Mapping):
+        raise OpenApiError(f"'paths' must be an object, got {type(paths).__name__}")
+
     for path in sorted(paths):
         path_item = paths[path]
+        if not isinstance(path_item, Mapping):
+            log.warning(
+                "path %r: expected an object, got %s; skipping", path, type(path_item).__name__
+            )
+            continue
         path_params = path_item.get("parameters", [])
         for method in sorted(path_item):
             if method.upper() not in EXPOSED_METHODS:
                 continue
             op = path_item[method]
-            if op.get("deprecated") and not include_deprecated:
-                continue
-            operations.append(
-                RawOperation(
+            try:
+                if not isinstance(op, Mapping):
+                    raise TypeError(f"expected an object, got {type(op).__name__}")
+                if op.get("deprecated") and not include_deprecated:
+                    continue
+                tags_value = op.get("tags", [])
+                tags = tuple(tags_value) if isinstance(tags_value, list) else ()
+                raw_op = RawOperation(
                     method=method,
                     path=path,
                     operation_id=op.get("operationId"),
                     summary=op.get("summary"),
                     description=op.get("description"),
-                    tags=tuple(op.get("tags", [])),
+                    tags=tags,
                     parameters=_merged_parameters(path_params, op.get("parameters", [])),
                     request_body=_request_body(op),
                     extensions=_extensions(op),
                 )
-            )
+            except (KeyError, TypeError, AttributeError) as exc:
+                log.warning("%s %s: malformed operation, skipping: %s", method.upper(), path, exc)
+                continue
+            operations.append(raw_op)
     return operations

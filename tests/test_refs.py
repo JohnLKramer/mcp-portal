@@ -1,3 +1,5 @@
+import time
+
 import pytest
 
 from mcp_portal.sources.refs import RefError, RefResolver
@@ -132,6 +134,40 @@ def test_a_pointer_traversing_through_a_scalar_is_a_ref_error_not_a_crash():
     doc = {"x": {"$ref": "#/foo/bar"}, "foo": "not a container"}
     with pytest.raises(RefError):
         RefResolver(doc, allow_external=False).resolve()
+
+
+def test_a_diamond_shaped_fan_out_reference_graph_resolves_quickly_and_correctly():
+    # Level0 is a leaf; LevelN has two properties both $ref-ing LevelN-1. Without
+    # memoization each level re-walks both of its children from scratch, which is
+    # exponential in N (confirmed to take ~49s at N=22 pre-fix) — a third-party
+    # document doing this unintentionally is indistinguishable from a DoS attempt.
+    depth = 20
+    schemas: dict = {"Level0": {"type": "string"}}
+    for level in range(1, depth + 1):
+        schemas[f"Level{level}"] = {
+            "type": "object",
+            "properties": {
+                "a": {"$ref": f"#/components/schemas/Level{level - 1}"},
+                "b": {"$ref": f"#/components/schemas/Level{level - 1}"},
+            },
+        }
+    doc = {
+        "components": {"schemas": schemas},
+        "x": {"$ref": f"#/components/schemas/Level{depth}"},
+    }
+
+    resolver = RefResolver(doc, allow_external=False)
+    started = time.monotonic()
+    resolved = resolver.resolve()
+    elapsed = time.monotonic() - started
+
+    assert elapsed < 2.0, f"expected near-instant resolution with memoization, took {elapsed}s"
+
+    node = resolved["x"]
+    for _ in range(depth):
+        assert node["type"] == "object"
+        node = node["properties"]["a"]
+    assert node == {"type": "string"}
 
 
 def test_identical_ref_text_across_two_documents_is_not_a_false_cycle():

@@ -114,3 +114,34 @@ def test_a_server_variable_with_no_default_is_an_error():
 def test_no_override_and_no_servers_is_an_error():
     with pytest.raises(OpenApiError):
         resolve_base_url({}, None)
+
+
+def test_a_non_object_first_server_is_an_error():
+    with pytest.raises(OpenApiError):
+        resolve_base_url({"servers": ["not-an-object"]}, None)
+
+
+def test_fetch_text_with_require_containment_rejects_a_relative_escape(tmp_path: Path):
+    (tmp_path / "openapi.json").write_text(MINIMAL_JSON)
+    (tmp_path.parent / "outside.json").write_text(MINIMAL_JSON)
+    try:
+        with pytest.raises(OpenApiError):
+            fetch_text("../outside.json", tmp_path, httpx.Client(), require_containment=True)
+    finally:
+        (tmp_path.parent / "outside.json").unlink()
+
+
+def test_fetch_text_with_require_containment_rejects_an_absolute_path(tmp_path: Path):
+    outside = tmp_path.parent / "outside.json"
+    outside.write_text(MINIMAL_JSON)
+    try:
+        with pytest.raises(OpenApiError):
+            fetch_text(str(outside), tmp_path, httpx.Client(), require_containment=True)
+    finally:
+        outside.unlink()
+
+
+def test_fetch_text_with_require_containment_allows_a_file_within_base_dir(tmp_path: Path):
+    (tmp_path / "common.json").write_text(MINIMAL_JSON)
+    text, is_yaml = fetch_text("common.json", tmp_path, httpx.Client(), require_containment=True)
+    assert text == MINIMAL_JSON

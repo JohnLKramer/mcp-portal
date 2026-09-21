@@ -57,6 +57,7 @@ class RefResolver:
         self._allowed_hosts = allowed_hosts
         self._fetch_external = fetch_external
         self._external_cache: dict[str, Mapping[str, Any]] = {}
+        self._resolved_cache: dict[tuple[int, str], Any] = {}
         self.warnings: list[str] = []
 
     def resolve(self) -> dict[str, Any]:
@@ -83,6 +84,13 @@ class RefResolver:
         if key in chain:
             self.warnings.append(f"circular $ref {ref!r} replaced with an open object schema")
             return {"type": "object"}
+        # Memoized *outside* the chain: a shared schema referenced from many
+        # places (fan-out, not a cycle) would otherwise be re-walked from
+        # scratch at every occurrence, which is exponential in the depth of a
+        # diamond-shaped reference graph — a third-party document doing this
+        # is indistinguishable from an accident and a deliberate DoS.
+        if key in self._resolved_cache:
+            return self._resolved_cache[key]
 
         target, pointer = _split(ref)
         # A bare `#/...` ref found while walking an externally-fetched document
@@ -90,7 +98,9 @@ class RefResolver:
         # component files conventionally cross-reference each other this way.
         new_root = self._external_document(target) if target else root
         node = _pointer_lookup(new_root, pointer or "#")
-        return self._walk(node, chain + (key,), new_root)
+        result = self._walk(node, chain + (key,), new_root)
+        self._resolved_cache[key] = result
+        return result
 
     def _external_document(self, target: str) -> Mapping[str, Any]:
         if not self._allow_external:

@@ -6,6 +6,7 @@ a correctness problem, not a feature.
 """
 
 import json
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -44,8 +45,16 @@ def parse_document(
     return data
 
 
-def fetch_text(location: str, base_dir: Path, client: httpx.Client) -> tuple[str, bool]:
-    """Return `(text, is_yaml)` for a URL or a file path relative to `base_dir`."""
+def fetch_text(
+    location: str, base_dir: Path, client: httpx.Client, *, require_containment: bool = False
+) -> tuple[str, bool]:
+    """Return `(text, is_yaml)` for a URL or a file path relative to `base_dir`.
+
+    `require_containment` is True for external $ref targets: the document
+    itself names this path, so it must not escape `base_dir` via `..` or an
+    absolute path — the same concern raised for network hosts, applied to
+    the filesystem.
+    """
     if location.startswith(("http://", "https://")):
         try:
             response = client.get(location, timeout=30.0)
@@ -58,6 +67,11 @@ def fetch_text(location: str, base_dir: Path, client: httpx.Client) -> tuple[str
 
     path = Path(location)
     resolved = path if path.is_absolute() else base_dir / path
+    if require_containment and not resolved.resolve().is_relative_to(base_dir.resolve()):
+        raise OpenApiError(
+            f"external $ref target {location!r} resolves outside the config directory; "
+            "file-based external refs must stay within it"
+        )
     try:
         text = resolved.read_text()
     except OSError as exc:
@@ -76,8 +90,11 @@ def resolve_base_url(document: dict[str, Any], base_url_override: str | None) ->
             "no 'base_url' was configured and the document declares no servers[] to fall back to"
         )
 
-    url: str = servers[0].get("url", "")
-    for name, spec in (servers[0].get("variables") or {}).items():
+    first = servers[0]
+    if not isinstance(first, Mapping):
+        raise OpenApiError(f"'servers[0]' must be an object, got {type(first).__name__}")
+    url: str = first.get("url", "")
+    for name, spec in (first.get("variables") or {}).items():
         default = spec.get("default")
         if default is None:
             raise OpenApiError(f"server variable {name!r} has no default and cannot be resolved")

@@ -1,3 +1,8 @@
+import logging
+
+import pytest
+
+from mcp_portal.sources.openapi_document import OpenApiError
 from mcp_portal.sources.openapi_paths import default_operation_id, extract_raw_operations
 
 DOC: dict = {
@@ -180,3 +185,92 @@ def test_operations_with_no_operation_id_have_none():
     doc = {"paths": {"/x": {"get": {"responses": {}}}}}
     (op,) = extract_raw_operations(doc)
     assert op.operation_id is None
+
+
+def test_paths_being_null_is_treated_as_no_paths_not_a_crash():
+    # `document.get("paths") or {}` coalesces an explicit `"paths": null` the
+    # same way it coalesces a missing "paths" key: both mean "no operations",
+    # not a fatal error. Only a truthy, non-mapping `paths` (e.g. a populated
+    # list) is a document-level failure — see the test below.
+    assert extract_raw_operations({"paths": None}) == []
+
+
+def test_paths_being_a_list_is_an_openapi_error():
+    with pytest.raises(OpenApiError):
+        extract_raw_operations({"paths": ["not", "a", "mapping"]})
+
+
+def test_a_method_value_of_null_is_skipped_with_a_warning(caplog):
+    doc = {"paths": {"/x": {"get": None}}}
+    with caplog.at_level(logging.WARNING, logger="mcp_portal"):
+        ops = extract_raw_operations(doc)
+    assert ops == []
+    assert "malformed operation" in caplog.text
+
+
+def test_a_parameter_object_that_is_a_string_is_skipped_with_a_warning(caplog):
+    doc = {
+        "paths": {
+            "/x": {"get": {"operationId": "get_x", "parameters": ["not-a-param"], "responses": {}}}
+        }
+    }
+    with caplog.at_level(logging.WARNING, logger="mcp_portal"):
+        ops = extract_raw_operations(doc)
+    assert ops == []
+    assert "malformed operation" in caplog.text
+
+
+def test_a_parameter_missing_a_name_is_skipped_with_a_warning(caplog):
+    doc = {
+        "paths": {
+            "/x": {
+                "get": {
+                    "operationId": "get_x",
+                    "parameters": [{"in": "query", "schema": {"type": "string"}}],
+                    "responses": {},
+                }
+            }
+        }
+    }
+    with caplog.at_level(logging.WARNING, logger="mcp_portal"):
+        ops = extract_raw_operations(doc)
+    assert ops == []
+    assert "malformed operation" in caplog.text
+
+
+def test_a_request_body_that_is_not_a_mapping_is_skipped_with_a_warning(caplog):
+    doc = {
+        "paths": {"/x": {"post": {"operationId": "post_x", "requestBody": "nope", "responses": {}}}}
+    }
+    with caplog.at_level(logging.WARNING, logger="mcp_portal"):
+        ops = extract_raw_operations(doc)
+    assert ops == []
+    assert "malformed operation" in caplog.text
+
+
+def test_parameters_that_are_not_a_list_is_skipped_with_a_warning(caplog):
+    doc = {
+        "paths": {
+            "/x": {
+                "get": {"operationId": "get_x", "parameters": {"not": "a list"}, "responses": {}}
+            }
+        }
+    }
+    with caplog.at_level(logging.WARNING, logger="mcp_portal"):
+        ops = extract_raw_operations(doc)
+    assert ops == []
+    assert "malformed operation" in caplog.text
+
+
+def test_a_string_path_item_is_skipped_with_a_warning(caplog):
+    doc = {"paths": {"/x": "not-an-object"}}
+    with caplog.at_level(logging.WARNING, logger="mcp_portal"):
+        ops = extract_raw_operations(doc)
+    assert ops == []
+    assert "expected an object" in caplog.text
+
+
+def test_tags_that_are_not_a_list_are_coerced_to_an_empty_tuple_not_iterated_as_characters():
+    doc = {"paths": {"/x": {"get": {"operationId": "get_x", "tags": "billing", "responses": {}}}}}
+    (op,) = extract_raw_operations(doc)
+    assert op.tags == ()

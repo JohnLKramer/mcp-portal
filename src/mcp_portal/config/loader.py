@@ -79,7 +79,7 @@ def resolve_secret(ref: str, base_dir: Path) -> str:
     return text[:-1] if text.endswith("\n") else text
 
 
-def _is_denylisted(header: str, extra: frozenset[str]) -> bool:
+def is_denylisted(header: str, extra: frozenset[str]) -> bool:
     lowered = header.lower()
     return (
         lowered in DENYLISTED_HEADERS or lowered in extra or lowered.startswith(DENYLISTED_PREFIXES)
@@ -98,7 +98,7 @@ def check_header_denylist(config: Config) -> None:
             if param.location is not ParamLocation.HEADER:
                 continue
             header = param.wire_name or param.arg
-            if _is_denylisted(header, credential_headers):
+            if is_denylisted(header, credential_headers):
                 raise ConfigError(
                     f"operation {op.id!r} declares header parameter {header!r}, "
                     "which is denylisted: a caller-supplied value here can bypass "
@@ -128,7 +128,7 @@ def check_operation_headers(
         for param in op.binding.parameters:
             if param.location is not ParamLocation.HEADER:
                 continue
-            if _is_denylisted(param.wire_name, credential_headers):
+            if is_denylisted(param.wire_name, credential_headers):
                 raise ConfigError(
                     f"operation {op.id!r} declares header parameter {param.wire_name!r}, "
                     "which is denylisted: a caller-supplied value here can bypass "
