@@ -120,6 +120,19 @@
       "title": "Effect",
       "type": "string"
     },
+    "IntrospectionConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "openapi": {
+          "$ref": "#/$defs/OpenApiIntrospectionConfig"
+        }
+      },
+      "required": [
+        "openapi"
+      ],
+      "title": "IntrospectionConfig",
+      "type": "object"
+    },
     "MatchSpec": {
       "additionalProperties": false,
       "properties": {
@@ -179,6 +192,55 @@
         }
       },
       "title": "NamingConfig",
+      "type": "object"
+    },
+    "OpenApiIntrospectionConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "url": {
+          "anyOf": [
+            {
+              "pattern": "^https?://[^/?#\\s]+",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Url"
+        },
+        "file": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "File"
+        },
+        "include_deprecated": {
+          "default": false,
+          "title": "Include Deprecated",
+          "type": "boolean"
+        },
+        "allow_external_refs": {
+          "default": false,
+          "title": "Allow External Refs",
+          "type": "boolean"
+        },
+        "allowed_hosts": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Allowed Hosts",
+          "type": "array"
+        }
+      },
+      "title": "OpenApiIntrospectionConfig",
       "type": "object"
     },
     "OperationEntry": {
@@ -469,9 +531,17 @@
           "type": "string"
         },
         "base_url": {
-          "pattern": "^https?://[^/?#\\s]+",
-          "title": "Base Url",
-          "type": "string"
+          "anyOf": [
+            {
+              "pattern": "^https?://[^/?#\\s]+",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Base Url"
         },
         "timeout_ms": {
           "default": 30000,
@@ -500,11 +570,19 @@
         },
         "auth": {
           "$ref": "#/$defs/UpstreamAuthConfig"
+        },
+        "introspection": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IntrospectionConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
-      "required": [
-        "base_url"
-      ],
       "title": "UpstreamConfig",
       "type": "object"
     }
@@ -517,9 +595,18 @@
       "type": "string"
     },
     "mode": {
-      "const": "configured",
+      "enum": [
+        "configured",
+        "introspect-safe",
+        "introspect-unsafe"
+      ],
       "title": "Mode",
       "type": "string"
+    },
+    "acknowledge_unsafe": {
+      "default": false,
+      "title": "Acknowledge Unsafe",
+      "type": "boolean"
     },
     "server": {
       "$ref": "#/$defs/ServerConfig"
