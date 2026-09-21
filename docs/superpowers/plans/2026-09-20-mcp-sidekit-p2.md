@@ -1740,7 +1740,7 @@ class OpenApiSource:
 
         try:
             check_path_template(binding)
-            resolve_arg_names(binding)
+            resolved = resolve_arg_names(binding)
             input_schema = build_input_schema(binding)
         except FlattenError as exc:
             log.warning(
@@ -1767,7 +1767,11 @@ class OpenApiSource:
             effect=derived_effect,
             sensitivity=Sensitivity.SENSITIVE if raw.extensions.get("x-mcp-sensitive") else Sensitivity.NORMAL,
             input_schema=input_schema,
-            binding=binding,
+            # `resolved`, not `binding`: `arg` names may have been collision-prefixed,
+            # and the input schema's property names must match what's stored here —
+            # `transports/http.py` looks up call arguments by `param.arg`. Mirrors
+            # `sources/explicit.py`'s identical pattern.
+            binding=resolved,
         )
 
     def _name_override(self, raw: RawOperation) -> str:
