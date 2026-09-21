@@ -1,0 +1,33 @@
+{
+  "openapi": "3.0.3",
+  "info": { "title": "Billing", "version": "1.0" },
+  "servers": [{ "url": "https://api.example.com/v1" }],
+  "components": {
+    "schemas": {
+      "Invoice": {
+        "type": "object",
+        "properties": {
+          "amount": { "type": "integer", "nullable": true, "minimum": 0, "exclusiveMinimum": true },
+          "parent": { "$ref": "#/components/schemas/Invoice" }
+        },
+        "required": ["amount"]
+      }
+    }
+  },
+  "paths": {
+    "/invoices": {
+      "post": {
+        "operationId": "create_invoice",
+        "summary": "Create an invoice.",
+        "tags": ["billing"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/Invoice" } }
+          }
+        },
+        "responses": { "201": { "description": "Created" } }
+      }
+    }
+  }
+}
