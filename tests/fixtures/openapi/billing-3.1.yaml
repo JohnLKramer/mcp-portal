@@ -1,0 +1,70 @@
+openapi: "3.1.0"
+info: { title: Billing, version: "1.0" }
+servers:
+  - url: https://api.example.com/v1
+paths:
+  /invoices:
+    parameters:
+      - name: customerId
+        in: query
+        required: true
+        schema: { type: string }
+    get:
+      operationId: list_invoices
+      summary: List invoices.
+      tags: [billing]
+      responses: { "200": { description: OK } }
+    post:
+      operationId: create_invoice
+      summary: Create an invoice.
+      tags: [billing]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties: { amount: { type: integer } }
+              required: [amount]
+      responses: { "201": { description: Created } }
+  /invoices/{id}:
+    get:
+      operationId: get_invoice
+      summary: Get an invoice.
+      tags: [billing]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses: { "200": { description: OK } }
+    delete:
+      operationId: cancel_invoice
+      summary: Cancel an invoice.
+      tags: [billing]
+      x-mcp-sensitive: true
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses: { "204": { description: "No Content" } }
+  /invoices/{id}/audit:
+    get:
+      operationId: get_invoice_audit
+      summary: Internal audit trail.
+      tags: [billing, internal]
+      x-mcp-exclude: true
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses: { "200": { description: OK } }
+  /invoices/legacy:
+    get:
+      operationId: list_invoices_legacy
+      summary: Deprecated legacy listing.
+      deprecated: true
+      tags: [billing]
+      responses: { "200": { description: OK } }

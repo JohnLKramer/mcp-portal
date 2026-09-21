@@ -42,6 +42,24 @@ class Base(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class OpenApiIntrospectionConfig(Base):
+    url: BaseUrl | None = None
+    file: str | None = None
+    include_deprecated: bool = False
+    allow_external_refs: bool = False
+    allowed_hosts: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _exactly_one_document_source(self) -> Self:
+        if (self.url is None) == (self.file is None):
+            raise ValueError("introspection.openapi requires exactly one of 'url' or 'file'")
+        return self
+
+
+class IntrospectionConfig(Base):
+    openapi: OpenApiIntrospectionConfig
+
+
 class OutboundConfig(Base):
     mode: Literal["none", "static"] = "none"
     header: str = "Authorization"
@@ -61,16 +79,26 @@ class UpstreamAuthConfig(Base):
 
 class UpstreamConfig(Base):
     protocol: Literal["http"] = "http"
-    base_url: BaseUrl
+    base_url: BaseUrl | None = None
     timeout_ms: int = Field(default=30000, gt=0)
     max_total_ms: int | None = Field(default=None, gt=0)
     max_response_bytes: int = Field(default=1024 * 1024, gt=0)
     auth: UpstreamAuthConfig = Field(default_factory=UpstreamAuthConfig)
+    introspection: IntrospectionConfig | None = None
 
     @model_validator(mode="after")
     def _default_total_budget(self) -> Self:
         if self.max_total_ms is None:
             object.__setattr__(self, "max_total_ms", self.timeout_ms * 3)
+        return self
+
+    @model_validator(mode="after")
+    def _base_url_or_introspection(self) -> Self:
+        if self.base_url is None and self.introspection is None:
+            raise ValueError(
+                "upstream requires either 'base_url' or 'introspection.openapi': "
+                "there is otherwise no way to determine which server to call"
+            )
         return self
 
 
@@ -149,7 +177,8 @@ class NamingConfig(Base):
 
 class Config(Base):
     version: Literal["1"]
-    mode: Literal["configured"]
+    mode: Literal["configured", "introspect-safe", "introspect-unsafe"]
+    acknowledge_unsafe: bool = False
     server: ServerConfig
     upstreams: dict[str, UpstreamConfig]
     operations: list[OperationEntry] = Field(default_factory=list)
@@ -162,4 +191,24 @@ class Config(Base):
         unknown = sorted({o.upstream for o in self.operations} - set(self.upstreams))
         if unknown:
             raise ValueError(f"operations reference unknown upstreams: {unknown}")
+        return self
+
+    @model_validator(mode="after")
+    def _unsafe_mode_requires_acknowledgement(self) -> Self:
+        if self.mode == "introspect-unsafe" and not self.acknowledge_unsafe:
+            raise ValueError(
+                "mode 'introspect-unsafe' requires 'acknowledge_unsafe: true'; selecting "
+                "the mode alone must not be enough to expose every discovered operation"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _configured_mode_needs_every_base_url(self) -> Self:
+        if self.mode == "configured":
+            missing = sorted(k for k, u in self.upstreams.items() if u.base_url is None)
+            if missing:
+                raise ValueError(
+                    f"upstream(s) {missing} have no 'base_url'; mode 'configured' never "
+                    "introspects, so it can never be resolved from a document"
+                )
         return self

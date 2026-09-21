@@ -153,3 +153,40 @@ def test_an_explicit_name_does_not_perturb_other_generated_names():
     # instead of being suffixed against a name nothing publishes.
     ts = build_toolset([named("a", "z"), op("list_invoices")], cfg())
     assert {o.id: o.name for o in ts.operations} == {"a": "z", "list_invoices": "list_invoices"}
+
+
+def test_introspect_safe_keeps_only_read_only_normal_sensitivity_operations():
+    ops = [
+        op("a", effect=Effect.READ_ONLY),
+        op("b", effect=Effect.ACTION),
+    ]
+    ts = build_toolset(ops, cfg(mode="introspect-safe"))
+    assert [o.id for o in ts.operations] == ["a"]
+
+
+def test_introspect_safe_excludes_sensitive_read_only_operations():
+    sensitive = dataclasses.replace(
+        op("a", effect=Effect.READ_ONLY), sensitivity=Sensitivity.SENSITIVE
+    )
+    ts = build_toolset([sensitive, op("b")], cfg(mode="introspect-safe"))
+    assert [o.id for o in ts.operations] == ["b"]
+
+
+def test_configured_mode_applies_no_posture_filter():
+    ops = [op("a", effect=Effect.ACTION)]
+    ts = build_toolset(ops, cfg())
+    assert [o.id for o in ts.operations] == ["a"]
+
+
+def test_introspect_unsafe_applies_no_posture_filter():
+    ops = [op("a", effect=Effect.ACTION)]
+    ts = build_toolset(ops, cfg(mode="introspect-unsafe", acknowledge_unsafe=True))
+    assert [o.id for o in ts.operations] == ["a"]
+
+
+def test_posture_runs_before_selection():
+    # introspect-safe drops "b" for being an action; selection would otherwise
+    # have kept it. If posture ran after selection, "b" would survive.
+    ops = [op("a", effect=Effect.READ_ONLY), op("b", effect=Effect.ACTION)]
+    ts = build_toolset(ops, cfg(mode="introspect-safe", selection={"include_ids": ["a", "b"]}))
+    assert [o.id for o in ts.operations] == ["a"]

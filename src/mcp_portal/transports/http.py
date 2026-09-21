@@ -239,7 +239,10 @@ class HttpTransport:
     async def execute(self, operation: Operation, arguments: dict[str, Any]) -> HttpResponse:
         binding = operation.binding
         assert isinstance(binding, HttpBinding)
-        request = build_request(binding, self._upstream.base_url, arguments, self._credential)
+        base_url = self._upstream.base_url
+        # Callers must resolve base_url before constructing HttpTransport.
+        assert base_url is not None
+        request = build_request(binding, base_url, arguments, self._credential)
 
         attempts = _MAX_ATTEMPTS if self._retryable(operation) else 1
         last: httpx.Response | None = None

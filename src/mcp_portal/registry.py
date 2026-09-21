@@ -16,7 +16,7 @@ from typing import Any
 
 from mcp_portal.config.models import ClassificationRule, Config, MatchSpec, SelectionConfig
 from mcp_portal.naming import NameCollisionError, NamingOptions, generate_names
-from mcp_portal.operations import Operation
+from mcp_portal.operations import Effect, Operation, Sensitivity
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -51,6 +51,23 @@ def _classify(ops: Sequence[Operation], rules: Sequence[ClassificationRule]) -> 
                 op = dataclasses.replace(op, **changes)
         result.append(op)
     return result
+
+
+def apply_mode_posture(operations: Sequence[Operation], mode: str) -> list[Operation]:
+    """`introspect-safe` keeps only read-only, non-sensitive operations (§2, §4).
+
+    Every other mode is unfiltered here: `configured` never introspects, and
+    `introspect-unsafe` is unfiltered by definition — its gate is the
+    `acknowledge_unsafe` config field, checked once at load (Task 1), not a
+    per-operation filter here.
+    """
+    if mode != "introspect-safe":
+        return list(operations)
+    return [
+        op
+        for op in operations
+        if op.effect is Effect.READ_ONLY and op.sensitivity is Sensitivity.NORMAL
+    ]
 
 
 def _select(
@@ -126,7 +143,8 @@ def _assign_names(selected: Sequence[Operation], options: NamingOptions) -> tupl
 
 def build_toolset(operations: Iterable[Operation], config: Config) -> ToolSet:
     classified = _classify(list(operations), config.classification)
-    selected, warnings = _select(classified, config.selection)
+    postured = apply_mode_posture(classified, config.mode)
+    selected, warnings = _select(postured, config.selection)
 
     options = NamingOptions(
         strategy=config.naming.strategy,

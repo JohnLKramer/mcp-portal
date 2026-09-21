@@ -32,8 +32,8 @@ def test_mode_is_required_and_has_no_default():
     assert "mode" in str(exc.value)
 
 
-def test_p1_mode_enum_contains_only_configured():
-    payload = MINIMAL | {"mode": "introspect-safe"}
+def test_mode_enum_rejects_anything_outside_the_three_published_values():
+    payload = MINIMAL | {"mode": "surveil"}
     with pytest.raises(ValidationError):
         Config.model_validate(payload)
 
@@ -141,3 +141,90 @@ def test_operation_referencing_an_unknown_upstream_is_rejected():
     with pytest.raises(ValidationError) as exc:
         Config.model_validate(payload)
     assert "nope" in str(exc.value)
+
+
+def test_introspect_safe_does_not_require_acknowledgement():
+    Config.model_validate(MINIMAL | {"mode": "introspect-safe"})
+
+
+def test_introspect_unsafe_without_acknowledgement_is_rejected():
+    with pytest.raises(ValidationError) as exc:
+        Config.model_validate(MINIMAL | {"mode": "introspect-unsafe"})
+    assert "acknowledge_unsafe" in str(exc.value)
+
+
+def test_introspect_unsafe_with_acknowledgement_is_accepted():
+    cfg = Config.model_validate(MINIMAL | {"mode": "introspect-unsafe", "acknowledge_unsafe": True})
+    assert cfg.mode == "introspect-unsafe"
+
+
+def test_upstream_with_neither_base_url_nor_introspection_is_rejected():
+    payload = MINIMAL | {"mode": "introspect-safe", "upstreams": {"billing": {}}}
+    with pytest.raises(ValidationError) as exc:
+        Config.model_validate(payload)
+    assert "base_url" in str(exc.value) or "introspection" in str(exc.value)
+
+
+def test_upstream_may_rely_on_introspection_instead_of_base_url():
+    payload = MINIMAL | {
+        "mode": "introspect-safe",
+        "upstreams": {
+            "billing": {
+                "introspection": {"openapi": {"url": "https://api.example.com/openapi.json"}}
+            }
+        },
+    }
+    cfg = Config.model_validate(payload)
+    assert cfg.upstreams["billing"].base_url is None
+    assert cfg.upstreams["billing"].introspection.openapi.url == (
+        "https://api.example.com/openapi.json"
+    )
+
+
+def test_configured_mode_requires_base_url_even_when_introspection_is_present():
+    payload = MINIMAL | {
+        "upstreams": {
+            "billing": {
+                "introspection": {"openapi": {"url": "https://api.example.com/openapi.json"}}
+            }
+        }
+    }
+    with pytest.raises(ValidationError) as exc:
+        Config.model_validate(payload)
+    assert "configured" in str(exc.value)
+
+
+def test_openapi_introspection_requires_exactly_one_of_url_or_file():
+    def with_openapi(openapi: dict) -> dict:
+        return MINIMAL | {
+            "mode": "introspect-safe",
+            "upstreams": {
+                "billing": {
+                    "base_url": "https://api.example.com",
+                    "introspection": {"openapi": openapi},
+                }
+            },
+        }
+
+    with pytest.raises(ValidationError):
+        Config.model_validate(with_openapi({}))
+    with pytest.raises(ValidationError):
+        Config.model_validate(
+            with_openapi({"url": "https://api.example.com/openapi.json", "file": "./openapi.json"})
+        )
+
+
+def test_openapi_introspection_defaults():
+    payload = MINIMAL | {
+        "mode": "introspect-safe",
+        "upstreams": {
+            "billing": {
+                "base_url": "https://api.example.com",
+                "introspection": {"openapi": {"file": "./openapi.json"}},
+            }
+        },
+    }
+    openapi = Config.model_validate(payload).upstreams["billing"].introspection.openapi
+    assert openapi.include_deprecated is False
+    assert openapi.allow_external_refs is False
+    assert openapi.allowed_hosts == []
