@@ -7,6 +7,7 @@ call is a config that fails to load.
 import json
 import os
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -15,7 +16,7 @@ from pydantic import ValidationError
 from ruamel.yaml import YAML
 
 from mcp_portal.config.models import SECRET_REF_PATTERN, Config
-from mcp_portal.operations import ParamLocation
+from mcp_portal.operations import HttpBinding, Operation, ParamLocation
 
 _SECRET_RE = re.compile(SECRET_REF_PATTERN)
 
@@ -100,6 +101,36 @@ def check_header_denylist(config: Config) -> None:
             if _is_denylisted(header, credential_headers):
                 raise ConfigError(
                     f"operation {op.id!r} declares header parameter {header!r}, "
+                    "which is denylisted: a caller-supplied value here can bypass "
+                    "the outbound credential or reshape the request"
+                )
+
+
+def credential_headers_for(config: Config) -> frozenset[str]:
+    return frozenset(
+        u.auth.outbound.header.lower()
+        for u in config.upstreams.values()
+        if u.auth.outbound.mode != "none"
+    )
+
+
+def check_operation_headers(
+    operations: Iterable[Operation], credential_headers: frozenset[str]
+) -> None:
+    """The same denylist as `check_header_denylist`, applied to any Operation list.
+
+    Explicit entries are checked here a second time as a side effect of the
+    caller merging both sources before this runs; that redundancy is harmless.
+    """
+    for op in operations:
+        if not isinstance(op.binding, HttpBinding):
+            continue
+        for param in op.binding.parameters:
+            if param.location is not ParamLocation.HEADER:
+                continue
+            if _is_denylisted(param.wire_name, credential_headers):
+                raise ConfigError(
+                    f"operation {op.id!r} declares header parameter {param.wire_name!r}, "
                     "which is denylisted: a caller-supplied value here can bypass "
                     "the outbound credential or reshape the request"
                 )

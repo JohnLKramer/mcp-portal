@@ -3,7 +3,22 @@ from pathlib import Path
 
 import pytest
 
-from mcp_portal.config.loader import ConfigError, load_config, resolve_secret
+from mcp_portal.config.loader import (
+    ConfigError,
+    check_operation_headers,
+    credential_headers_for,
+    load_config,
+    resolve_secret,
+)
+from mcp_portal.config.models import Config
+from mcp_portal.operations import (
+    Effect,
+    HttpBinding,
+    Operation,
+    Parameter,
+    ParamLocation,
+    Sensitivity,
+)
 
 MINIMAL: dict = {
     "version": "1",
@@ -155,3 +170,68 @@ def test_an_ordinary_header_parameter_is_allowed(tmp_path: Path):
         ]
     }
     assert load_config(write(tmp_path, payload)).config.operations[0].id == "x"
+
+
+def header_op(wire_name: str) -> Operation:
+    return Operation(
+        id="x",
+        upstream="billing",
+        name="",
+        title="x",
+        description="d",
+        group_tags=(),
+        effect=Effect.READ_ONLY,
+        sensitivity=Sensitivity.NORMAL,
+        input_schema={"type": "object", "properties": {}},
+        binding=HttpBinding(
+            method="GET",
+            path="/x",
+            parameters=(
+                Parameter(
+                    arg="h",
+                    location=ParamLocation.HEADER,
+                    wire_name=wire_name,
+                    required=False,
+                    schema={"type": "string"},
+                ),
+            ),
+        ),
+    )
+
+
+def test_credential_headers_for_collects_every_configured_outbound_header(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setenv("K", "v")
+    payload = MINIMAL | {
+        "upstreams": {
+            "billing": {
+                "base_url": "https://api.example.com",
+                "auth": {
+                    "outbound": {"mode": "static", "header": "X-Api-Key", "value": "${env:K}"}
+                },
+            }
+        }
+    }
+    cfg = Config.model_validate(payload)
+    assert credential_headers_for(cfg) == frozenset({"x-api-key"})
+
+
+def test_credential_headers_for_is_empty_when_no_upstream_configures_static_auth():
+    cfg = Config.model_validate(MINIMAL)
+    assert credential_headers_for(cfg) == frozenset()
+
+
+def test_check_operation_headers_rejects_a_denylisted_header():
+    with pytest.raises(ConfigError) as exc:
+        check_operation_headers([header_op("Authorization")], frozenset())
+    assert "Authorization" in str(exc.value)
+
+
+def test_check_operation_headers_rejects_a_configured_credential_header():
+    with pytest.raises(ConfigError):
+        check_operation_headers([header_op("X-Api-Key")], frozenset({"x-api-key"}))
+
+
+def test_check_operation_headers_allows_an_ordinary_header():
+    check_operation_headers([header_op("X-Trace-Id")], frozenset())  # does not raise
