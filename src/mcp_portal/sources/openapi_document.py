@@ -18,8 +18,15 @@ class OpenApiError(Exception):
     """Raised for any problem loading, parsing, or resolving an OpenAPI document."""
 
 
-def parse_document(text: str, *, is_yaml: bool) -> dict[str, Any]:
-    """Parse JSON or YAML text and validate it contains an OpenAPI document."""
+def parse_document(
+    text: str, *, is_yaml: bool, require_openapi_field: bool = True
+) -> dict[str, Any]:
+    """Parse JSON or YAML text.
+
+    `require_openapi_field` is False for external `$ref` targets: a shared
+    component-schema fragment has no top-level `openapi` version field, only
+    the entry document does.
+    """
     if is_yaml:
         try:
             data = YAML(typ="safe").load(text)
@@ -30,7 +37,9 @@ def parse_document(text: str, *, is_yaml: bool) -> dict[str, Any]:
             data = json.loads(text)
         except json.JSONDecodeError as exc:
             raise OpenApiError(f"invalid JSON in OpenAPI document: {exc}") from exc
-    if not isinstance(data, dict) or "openapi" not in data:
+    if not isinstance(data, dict):
+        raise OpenApiError("not a mapping: expected a JSON/YAML object at the top level")
+    if require_openapi_field and "openapi" not in data:
         raise OpenApiError("not an OpenAPI document: missing top-level 'openapi' version field")
     return data
 

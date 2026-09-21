@@ -40,6 +40,11 @@ def test_parse_document_rejects_a_document_with_no_openapi_field():
     assert "openapi" in str(exc.value)
 
 
+def test_parse_document_with_require_openapi_field_false_accepts_a_fragment():
+    doc = parse_document('{"Foo": {"type": "string"}}', is_yaml=False, require_openapi_field=False)
+    assert doc == {"Foo": {"type": "string"}}
+
+
 def test_fetch_text_reads_a_local_file_relative_to_base_dir(tmp_path: Path):
     (tmp_path / "openapi.json").write_text(MINIMAL_JSON)
     text, is_yaml = fetch_text("openapi.json", tmp_path, httpx.Client())

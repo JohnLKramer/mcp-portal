@@ -64,7 +64,9 @@ class LoadedDocument:
 
 def _fetch_external(target: str, base_dir: Path, client: httpx.Client) -> dict[str, Any]:
     text, is_yaml = fetch_text(target, base_dir, client)
-    return parse_document(text, is_yaml=is_yaml)
+    # An external $ref target is typically a component-schema fragment, not a
+    # full OpenAPI document — it has no top-level `openapi` version field.
+    return parse_document(text, is_yaml=is_yaml, require_openapi_field=False)
 
 
 def load_document(
@@ -154,10 +156,18 @@ class OpenApiSource:
             return None
 
         op_id = raw.operation_id or _default_id(raw)
-        description = (
+        # str(...) coerces whatever wins: an x-mcp-* extension is a raw document
+        # value of unknown type, and a non-string here must not crash the load —
+        # the same "one bad operation must not fail the whole load" principle
+        # that governs the FlattenError handling above.
+        description = str(
             raw.extensions.get("x-mcp-description") or raw.description or raw.summary or op_id
         )
-        title = raw.extensions.get("x-mcp-title") or raw.summary or description.splitlines()[0]
+        title = str(
+            raw.extensions.get("x-mcp-title")
+            or raw.summary
+            or next(iter(description.splitlines()), op_id)
+        )
         name = self._name_override(raw)
 
         return Operation(

@@ -213,3 +213,59 @@ def test_load_document_applies_dialect_conversion_only_to_30_documents(tmp_path:
     loaded = load_document(config, tmp_path, None, httpx.Client())
     (op,) = list(OpenApiSource("billing", loaded, include_deprecated=False).operations())
     assert op.input_schema["properties"]["amount"]["type"] == ["integer", "null"]
+
+
+def test_an_external_ref_to_a_plain_component_fragment_resolves(tmp_path: Path):
+    doc = {
+        "openapi": "3.1.0",
+        "servers": [{"url": "https://api.example.com"}],
+        "paths": {
+            "/x": {
+                "post": {
+                    "operationId": "x",
+                    "requestBody": {
+                        "content": {
+                            "application/json": {
+                                "schema": {"$ref": "https://trusted.example.com/common.yaml#/Foo"}
+                            }
+                        }
+                    },
+                    "responses": {},
+                }
+            }
+        },
+    }
+    write_doc(tmp_path, doc)
+    config = OpenApiIntrospectionConfig(
+        file="openapi.json", allow_external_refs=True, allowed_hosts=["trusted.example.com"]
+    )
+
+    import mcp_portal.sources.openapi as openapi_module
+
+    original_fetch_text = openapi_module.fetch_text
+
+    def fetch(target: str, base_dir, client) -> tuple[str, bool]:
+        # `fetch_text` is also used by `load_document` itself to read the entry
+        # document ("openapi.json"), so only intercept the external ref target
+        # and delegate everything else to the real implementation.
+        if target == "https://trusted.example.com/common.yaml":
+            return '{"Foo": {"type": "object", "properties": {"n": {"type": "integer"}}}}', False
+        return original_fetch_text(target, base_dir, client)
+
+    openapi_module.fetch_text = fetch
+    try:
+        loaded = load_document(config, tmp_path, None, httpx.Client())
+        (op,) = list(OpenApiSource("billing", loaded, include_deprecated=False).operations())
+    finally:
+        openapi_module.fetch_text = original_fetch_text
+    assert op.input_schema["properties"]["n"] == {"type": "integer"}
+
+
+def test_a_non_string_x_mcp_description_does_not_crash_the_load(tmp_path: Path):
+    doc = {
+        "openapi": "3.1.0",
+        "servers": [{"url": "https://api.example.com"}],
+        "paths": {"/x": {"get": {"operationId": "x", "x-mcp-description": 42, "responses": {}}}},
+    }
+    (op,) = load(tmp_path, doc)
+    assert op.description == "42"
