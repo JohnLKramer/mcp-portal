@@ -1,6 +1,12 @@
 from mcp_portal.auth.principal import Principal
 from mcp_portal.auth.rar import AuthorizationDetail
-from mcp_portal.config.policy import PolicyConfig
+from mcp_portal.config.policy import (
+    PolicyConfig,
+    PolicyDefaults,
+    PolicyMatchSpec,
+    PolicyOutboundConfig,
+    PolicyRule,
+)
 from mcp_portal.operations import (
     Effect,
     HttpBinding,
@@ -132,6 +138,27 @@ def test_carry_is_true_when_any_matching_rule_sets_it():
     decision = PolicyEngine(cfg).evaluate(op(), principal())
     assert decision.allowed is True
     assert decision.carry is True
+
+
+def test_a_carry_only_rule_does_not_count_as_matched_under_unmatched_deny():
+    # PolicyConfig.model_validate would reject this combination (an earlier
+    # task's _require_less_rule_forbidden_under_deny validator), so
+    # model_construct is used to reach the state directly and verify
+    # PolicyEngine's own defense-in-depth: a carry-only rule's match must
+    # never count toward `defaults.unmatched`, even though the config loader
+    # also independently forbids this shape.
+    cfg = PolicyConfig.model_construct(
+        version="1",
+        defaults=PolicyDefaults(unmatched="deny"),
+        rules=[
+            PolicyRule(
+                match=PolicyMatchSpec(tags=["billing"]),
+                outbound=PolicyOutboundConfig(carry=True),
+            )
+        ],
+    )
+    decision = PolicyEngine(cfg).evaluate(op(), principal())
+    assert decision.allowed is False
 
 
 def test_carry_is_false_when_no_matching_rule_sets_it():
