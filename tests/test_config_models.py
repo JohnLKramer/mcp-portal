@@ -290,6 +290,9 @@ def test_transport_http_defaults_its_own_server_config():
     assert cfg.http.host == "127.0.0.1"
     assert cfg.http.path == "/mcp"
     assert cfg.http.allowed_origins == []
+    # Empty by default: a loopback bind needs no operator-supplied Host, since
+    # `_security_settings` allows the loopback spellings itself.
+    assert cfg.http.allowed_hosts == []
 
 
 def test_inbound_disabled_by_default():
