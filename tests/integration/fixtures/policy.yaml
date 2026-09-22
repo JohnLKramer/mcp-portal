@@ -1,0 +1,9 @@
+version: "1"
+defaults:
+  unmatched: allow
+rules:
+  - match:
+      ids: [get_customer_tax_id]
+    require:
+      authorization_details:
+        - type: customer_data

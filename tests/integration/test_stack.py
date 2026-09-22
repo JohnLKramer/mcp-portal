@@ -4,13 +4,8 @@ Requires Docker. Excluded from the default `uv run pytest` run — invoke with
 `uv run pytest -m integration`. Skips (not fails) if Docker isn't available.
 """
 
-import shutil
-import subprocess
-import time
-from collections.abc import Iterator
 from pathlib import Path
 
-import httpx
 import pytest
 
 from mcp_portal.app import build_app
@@ -18,38 +13,7 @@ from mcp_portal.config.loader import load_config
 
 pytestmark = pytest.mark.integration
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
 STACK_CONFIG = Path(__file__).resolve().parent / "fixtures" / "stack.yaml"
-MOCK_HEALTH_URLS = ("http://localhost:8081/healthz", "http://localhost:8082/healthz")
-
-
-def _wait_for_health(timeout: float = 30.0) -> None:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        try:
-            if all(httpx.get(url, timeout=1.0).status_code == 200 for url in MOCK_HEALTH_URLS):
-                return
-        except httpx.HTTPError:
-            pass
-        time.sleep(0.5)
-    raise TimeoutError("mock backends did not become healthy in time")
-
-
-@pytest.fixture(scope="session")
-def mock_stack() -> Iterator[None]:
-    if shutil.which("docker") is None:
-        pytest.skip("docker is not available")
-
-    subprocess.run(
-        ["docker", "compose", "up", "-d", "--build", "billing-mock", "orders-mock"],
-        cwd=REPO_ROOT,
-        check=True,
-    )
-    try:
-        _wait_for_health()
-        yield
-    finally:
-        subprocess.run(["docker", "compose", "down"], cwd=REPO_ROOT, check=True)
 
 
 @pytest.mark.anyio

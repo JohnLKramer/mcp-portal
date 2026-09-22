@@ -9,9 +9,21 @@ upstreams:
   billing:
     base_url: http://localhost:8081
     timeout_ms: 5000
+    auth:
+      outbound:
+        mode: client_credentials
+        token_endpoint: http://localhost:8083/default/token
+        client_id: billing-client
+        client_secret: ${env:MOCK_OAUTH2_CLIENT_SECRET}
   orders:
     base_url: http://localhost:8082
     timeout_ms: 5000
+    auth:
+      outbound:
+        mode: static
+        header: X-Api-Key
+        scheme: null
+        value: ${env:ORDERS_MOCK_API_KEY}
 
 naming:
   strategy: operation_id

@@ -1,0 +1,23 @@
+version: "1"
+mode: introspect-safe
+
+server:
+  name: integration-portal-introspection
+  transport: stdio
+
+upstreams:
+  billing:
+    base_url: http://localhost:8081
+    timeout_ms: 5000
+    auth:
+      outbound:
+        mode: client_credentials
+        token_endpoint: http://localhost:8083/default/token
+        client_id: billing-client
+        client_secret: ${env:MOCK_OAUTH2_CLIENT_SECRET}
+    introspection:
+      openapi:
+        url: http://localhost:8081/openapi.json
+
+naming:
+  strategy: operation_id

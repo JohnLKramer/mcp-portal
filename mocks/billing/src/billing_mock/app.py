@@ -1,8 +1,42 @@
 """In-memory mock of the billing API described by examples/billing.yaml."""
 
+import os
+
+import jwt
 from flask import Flask, jsonify, request
 
 app = Flask(__name__)
+
+_OAUTH_ISSUER = os.environ.get("MOCK_OAUTH2_ISSUER", "http://mock-oauth2-server:8080/default")
+_jwks_client = jwt.PyJWKClient(f"{_OAUTH_ISSUER}/jwks")
+
+
+# Every tests/integration/fixtures/*.yaml upstream pointed at this mock must
+# carry an outbound.mode: client_credentials credential (stack.yaml,
+# stack-introspection.yaml, stack-policy-denied.yaml,
+# stack-policy-authorized.yaml, stack-oauth.yaml) — missing one is a silent
+# 401 regression, not a compile-time error.
+@app.before_request
+def _require_bearer_token():
+    if request.path in ("/healthz", "/openapi.json"):
+        return None
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        return jsonify(error="missing bearer token"), 401
+    token = auth_header.removeprefix("Bearer ")
+    try:
+        signing_key = _jwks_client.get_signing_key_from_jwt(token)
+        jwt.decode(
+            token,
+            signing_key.key,
+            algorithms=["RS256"],
+            audience="billing-mock",
+            issuer=_OAUTH_ISSUER,
+        )
+    except (jwt.InvalidTokenError, jwt.PyJWKClientError):
+        return jsonify(error="invalid bearer token"), 401
+    return None
+
 
 _INVOICES: dict[str, list[dict[str, object]]] = {
     "cust_1": [
@@ -12,6 +46,53 @@ _INVOICES: dict[str, list[dict[str, object]]] = {
 }
 _TAX_IDS = {"cust_1": "TAX-CUST-1"}
 _next_invoice_id = 3
+
+_OPENAPI_DOC = {
+    "openapi": "3.0.3",
+    "info": {"title": "Billing Mock API", "version": "1.0.0"},
+    "servers": [{"url": "http://localhost:8080"}],
+    "paths": {
+        "/v1/invoices": {
+            "get": {
+                "operationId": "listInvoices",
+                "parameters": [
+                    {
+                        "name": "customerId",
+                        "in": "query",
+                        "required": True,
+                        "schema": {"type": "string"},
+                    },
+                    {
+                        "name": "limit",
+                        "in": "query",
+                        "required": False,
+                        "schema": {"type": "integer"},
+                    },
+                ],
+                "responses": {"200": {"description": "OK"}},
+            },
+            "post": {
+                "operationId": "createInvoice",
+                "requestBody": {
+                    "required": True,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "properties": {
+                                    "customer_id": {"type": "string"},
+                                    "amount_cents": {"type": "integer"},
+                                },
+                                "required": ["customer_id", "amount_cents"],
+                            }
+                        }
+                    },
+                },
+                "responses": {"201": {"description": "Created"}},
+            },
+        },
+    },
+}
 
 
 @app.get("/healthz")
@@ -55,3 +136,8 @@ def create_invoice():
     _next_invoice_id += 1
     _INVOICES.setdefault(customer_id, []).append(invoice)
     return jsonify(invoice), 201
+
+
+@app.get("/openapi.json")
+def openapi_document():
+    return jsonify(_OPENAPI_DOC)

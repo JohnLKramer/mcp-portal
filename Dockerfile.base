@@ -1,0 +1,16 @@
+# syntax=docker/dockerfile:1
+# Shared layers for every mcp-portal image (the main app and every
+# mocks/* service). Never built or run on its own — consumed through
+# docker-bake.hcl's base-builder/base-runtime targets and the
+# additional-build-context mechanism in each service's own Dockerfile.
+
+FROM python:3.14.7-slim AS base-builder
+WORKDIR /app
+RUN pip install --no-cache-dir uv
+
+FROM python:3.14.7-slim AS base-runtime
+RUN groupadd -r appuser && useradd -r -g appuser appuser
+WORKDIR /app
+ENV PATH="/app/.venv/bin:$PATH" \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
