@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from mcp_portal.config.models import Config
+from mcp_portal.config.models import Config, OutboundConfig
 
 MINIMAL: dict = {
     "version": "1",
@@ -256,3 +256,30 @@ def test_policy_file_is_a_bare_path_string():
 def test_auth_rejects_unknown_fields():
     with pytest.raises(ValidationError):
         Config.model_validate(MINIMAL | {"auth": {"inbound": {"enabled": True}}})
+
+
+def test_client_credentials_mode_requires_token_endpoint_client_id_and_secret():
+    with pytest.raises(ValidationError):
+        OutboundConfig(mode="client_credentials")
+
+
+def test_client_credentials_mode_validates_with_all_three():
+    cfg = OutboundConfig(
+        mode="client_credentials",
+        token_endpoint="https://idp.example.com/oauth2/token",
+        client_id="sidekit-billing",
+        client_secret="${env:BILLING_CLIENT_SECRET}",
+        scopes=["invoices.write"],
+    )
+    assert cfg.token_endpoint == "https://idp.example.com/oauth2/token"
+    assert cfg.scopes == ["invoices.write"]
+
+
+def test_client_credentials_mode_rejects_a_literal_client_secret():
+    with pytest.raises(ValidationError):
+        OutboundConfig(
+            mode="client_credentials",
+            token_endpoint="https://idp.example.com/oauth2/token",
+            client_id="sidekit-billing",
+            client_secret="not-a-reference",
+        )

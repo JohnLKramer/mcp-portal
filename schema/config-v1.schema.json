@@ -358,7 +358,8 @@
           "default": "none",
           "enum": [
             "none",
-            "static"
+            "static",
+            "client_credentials"
           ],
           "title": "Mode",
           "type": "string"
@@ -392,6 +393,51 @@
           ],
           "default": null,
           "title": "Value"
+        },
+        "token_endpoint": {
+          "anyOf": [
+            {
+              "pattern": "^https?://[^/?#\\s]+",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Token Endpoint"
+        },
+        "client_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Client Id"
+        },
+        "client_secret": {
+          "anyOf": [
+            {
+              "pattern": "^\\$\\{(env|file):[^}]+\\}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Client Secret"
+        },
+        "scopes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Scopes",
+          "type": "array"
         }
       },
       "title": "OutboundConfig",
