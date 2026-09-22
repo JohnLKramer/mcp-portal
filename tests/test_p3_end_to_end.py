@@ -1,12 +1,16 @@
+import shutil
 from pathlib import Path
 
 import httpx
 import pytest
+from ruamel.yaml import YAML
 
 from mcp_portal.app import build_app
 from mcp_portal.config.loader import load_config
 
 FIXTURES = Path(__file__).parent / "fixtures"
+
+_yaml = YAML()
 
 
 @pytest.mark.anyio
@@ -36,24 +40,19 @@ async def test_the_read_only_operation_is_unaffected_by_the_action_only_rule():
 
 
 @pytest.mark.anyio
-async def test_removing_the_local_principals_authorization_detail_denies_the_action():
-    raw_config = (
-        (FIXTURES / "p3-config.yaml")
-        .read_text()
-        .replace(
-            "        actions: [initiate]\n        locations:"
-            ' ["https://api.example.com/v1/payments"]\n',
-            "",
-        )
-    )
-    config_path = FIXTURES / "p3-config-no-principal-detail.yaml"
-    config_path.write_text(raw_config)
-    try:
-        loaded = load_config(config_path)
-        app = build_app(loaded)
-        result = await app.invoker.call("initiate_payment", {"amount": 100})
-        assert result.is_error is True
-        assert "payment_initiation" in result.content[0].text
-        await app.aclose()
-    finally:
-        config_path.unlink()
+async def test_removing_the_local_principals_authorization_detail_denies_the_action(tmp_path):
+    with (FIXTURES / "p3-config.yaml").open() as f:
+        config_dict = _yaml.load(f)
+    config_dict["auth"]["local_principal"]["authorization_details"] = []
+
+    config_path = tmp_path / "p3-config.yaml"
+    with config_path.open("w") as f:
+        _yaml.dump(config_dict, f)
+    shutil.copy(FIXTURES / "p3-policy.yaml", tmp_path / "p3-policy.yaml")
+
+    loaded = load_config(config_path)
+    app = build_app(loaded)
+    result = await app.invoker.call("initiate_payment", {"amount": 100})
+    assert result.is_error is True
+    assert "payment_initiation" in result.content[0].text
+    await app.aclose()

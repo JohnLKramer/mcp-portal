@@ -59,7 +59,7 @@ class ToolInvoker:
         self,
         toolset: ToolSet,
         transports: Mapping[str, HttpTransport],
-        policy: PolicyEngine | None = None,
+        policy: PolicyEngine,
         principal: Principal | None = None,
     ) -> None:
         self._toolset = toolset
@@ -83,13 +83,12 @@ class ToolInvoker:
             where = f" at {field}" if field else ""
             return _error(f"invalid arguments for {name!r}{where}: {exc.message}")
 
-        if self._policy is not None:
-            decision = self._policy.evaluate(operation, self._principal)
-            if not decision.allowed:
-                missing = ", ".join(d.type for d in decision.missing) or "policy default is deny"
-                # Never the token/principal contents (§10) — only which
-                # requirement type was missing.
-                return _error(f"authorization denied for {name!r}: missing {missing}")
+        decision = self._policy.evaluate(operation, self._principal)
+        if not decision.allowed:
+            missing = ", ".join(d.type for d in decision.missing) or "policy default is deny"
+            # Never the token/principal contents (§10) — only which
+            # requirement type was missing.
+            return _error(f"authorization denied for {name!r}: missing {missing}")
 
         transport = self._transports.get(operation.upstream)
         if transport is None:

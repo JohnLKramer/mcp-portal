@@ -77,6 +77,7 @@ def invoker(handler, operation: Operation) -> ToolInvoker:
     return ToolInvoker(
         toolset=toolset,
         transports={"billing": HttpTransport(client, upstream, None)},
+        policy=PolicyEngine(PolicyConfig(version="1")),
     )
 
 
