@@ -63,6 +63,40 @@ def test_configure_on_a_fresh_config_writes_operations_and_policy(tmp_path: Path
     load_config(config_path)
 
 
+def test_configure_does_not_leave_a_config_referencing_a_missing_policy_file(
+    tmp_path: Path, monkeypatch
+):
+    config_path = _new_config_yaml(tmp_path)
+    policy_path = tmp_path / "policy.yaml"
+
+    # Accept the group-level survey, but decline the policy write when asked.
+    # Policy is now written before config, so the sequence is: survey
+    # accept-all (True), policy write confirm (False -> declined). The config
+    # write confirm is never reached because the function returns early.
+    answers = iter([True, False])
+    monkeypatch.setattr("builtins.input", lambda *_args: "y" if next(answers) else "n")
+
+    code = main(
+        [
+            "configure",
+            "--config",
+            str(config_path),
+            "--policy",
+            str(policy_path),
+        ]
+    )
+
+    assert code == 0
+    assert not policy_path.exists()
+
+    # The config must NOT have been written either, since it would reference
+    # a policy file that doesn't exist.
+    from mcp_portal.config.loader import load_config as real_load_config
+
+    reloaded = real_load_config(config_path)
+    assert reloaded.config.operations == []
+
+
 def _load_yaml(path: Path):
     from ruamel.yaml import YAML
 

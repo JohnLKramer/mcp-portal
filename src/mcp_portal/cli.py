@@ -108,11 +108,11 @@ def _run_configure(config_path: Path, policy_path: Path | None) -> int:
     rendered_config["policy"] = {"file": str(policy_path)}
     rendered_policy = render_policy(result.decisions)
 
-    if not write_with_confirmation(config_path, rendered_config, prompter):
-        print("config not written.")
-        return 0
     if not write_with_confirmation(policy_path, rendered_policy, prompter):
         print("policy not written.")
+        return 0
+    if not write_with_confirmation(config_path, rendered_config, prompter):
+        print("config not written.")
         return 0
 
     # PolicyConfig is validated on next real load by config.loader; validate
