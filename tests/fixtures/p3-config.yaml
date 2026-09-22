@@ -1,0 +1,36 @@
+version: "1"
+mode: configured
+server:
+  name: billing-portal
+  transport: stdio
+upstreams:
+  billing:
+    base_url: https://api.example.com
+operations:
+  - id: initiate_payment
+    upstream: billing
+    description: Initiate a payment.
+    group_tags: [billing]
+    binding:
+      protocol: http
+      method: POST
+      path: /v1/payments
+      body:
+        content_type: application/json
+        schema: { type: object, properties: { amount: { type: integer } } }
+  - id: list_invoices
+    upstream: billing
+    description: List invoices.
+    group_tags: [billing]
+    binding:
+      protocol: http
+      method: GET
+      path: /v1/invoices
+auth:
+  local_principal:
+    authorization_details:
+      - type: payment_initiation
+        actions: [initiate]
+        locations: ["https://api.example.com/v1/payments"]
+policy:
+  file: ./p3-policy.yaml
