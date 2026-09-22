@@ -1,0 +1,17 @@
+version: "1"
+mode: introspect-safe
+
+server:
+  name: integration-portal-introspection
+  transport: stdio
+
+upstreams:
+  billing:
+    base_url: http://localhost:8081
+    timeout_ms: 5000
+    introspection:
+      openapi:
+        url: http://localhost:8081/openapi.json
+
+naming:
+  strategy: operation_id

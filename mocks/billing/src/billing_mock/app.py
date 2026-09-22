@@ -13,6 +13,53 @@ _INVOICES: dict[str, list[dict[str, object]]] = {
 _TAX_IDS = {"cust_1": "TAX-CUST-1"}
 _next_invoice_id = 3
 
+_OPENAPI_DOC = {
+    "openapi": "3.0.3",
+    "info": {"title": "Billing Mock API", "version": "1.0.0"},
+    "servers": [{"url": "http://localhost:8080"}],
+    "paths": {
+        "/v1/invoices": {
+            "get": {
+                "operationId": "listInvoices",
+                "parameters": [
+                    {
+                        "name": "customerId",
+                        "in": "query",
+                        "required": True,
+                        "schema": {"type": "string"},
+                    },
+                    {
+                        "name": "limit",
+                        "in": "query",
+                        "required": False,
+                        "schema": {"type": "integer"},
+                    },
+                ],
+                "responses": {"200": {"description": "OK"}},
+            },
+            "post": {
+                "operationId": "createInvoice",
+                "requestBody": {
+                    "required": True,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "properties": {
+                                    "customer_id": {"type": "string"},
+                                    "amount_cents": {"type": "integer"},
+                                },
+                                "required": ["customer_id", "amount_cents"],
+                            }
+                        }
+                    },
+                },
+                "responses": {"201": {"description": "Created"}},
+            },
+        },
+    },
+}
+
 
 @app.get("/healthz")
 def healthz():
@@ -55,3 +102,8 @@ def create_invoice():
     _next_invoice_id += 1
     _INVOICES.setdefault(customer_id, []).append(invoice)
     return jsonify(invoice), 201
+
+
+@app.get("/openapi.json")
+def openapi_document():
+    return jsonify(_OPENAPI_DOC)

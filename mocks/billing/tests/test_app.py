@@ -60,3 +60,11 @@ def test_create_invoice_adds_and_returns_invoice(client):
 
     listed = client.get("/v1/invoices", query_string={"customerId": "cust_2"})
     assert len(listed.get_json()["invoices"]) == 1
+
+
+def test_openapi_document_describes_list_and_create_invoices(client):
+    response = client.get("/openapi.json")
+    assert response.status_code == 200
+    doc = response.get_json()
+    assert doc["paths"]["/v1/invoices"]["get"]["operationId"] == "listInvoices"
+    assert doc["paths"]["/v1/invoices"]["post"]["operationId"] == "createInvoice"
