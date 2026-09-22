@@ -1172,12 +1172,75 @@ the token endpoint / audience / issuer values in `stack-oauth.yaml` and the
 mock IdP's `JSON_CONFIG` agree; this is the step most likely to need
 iteration against the pinned image version's actual behavior.
 
-- [ ] **Step 10: Commit**
+- [ ] **Step 10: Retrofit Tasks 3 and 4's fixtures — billing now requires a
+      bearer token everywhere except `/healthz` and `/openapi.json`**
+
+Tasks 3 (introspection) and 4 (RAR policy) both call `mocks/billing`
+routes with no credential at all, because when those tasks were written
+`mocks/billing` had no auth yet. Step 5 of *this* task changed that for
+every route except `/healthz`/`/openapi.json` — so `stack-introspection.yaml`,
+`stack-policy-denied.yaml`, and `stack-policy-authorized.yaml` would now get
+`401`s calling `listinvoices`/`createinvoice`/`billing_get_customer_tax_id`/
+`billing_list_invoices` unless they're given the same `client_credentials`
+credential `stack-oauth.yaml` uses. Fix all three in this step, as part of
+this task, since this task is what changed the underlying behavior — the
+same pattern Task 2 already used to retrofit `stack.yaml` when
+`mocks/orders` started requiring an API key.
+
+Add this block to each of `tests/integration/fixtures/stack-introspection.yaml`,
+`tests/integration/fixtures/stack-policy-denied.yaml`, and
+`tests/integration/fixtures/stack-policy-authorized.yaml`'s `billing` upstream
+(same shape as `stack-oauth.yaml`'s):
+
+```yaml
+    auth:
+      outbound:
+        mode: client_credentials
+        token_endpoint: http://localhost:8083/default/token
+        client_id: billing-client
+        client_secret: ${env:MOCK_OAUTH2_CLIENT_SECRET}
+```
+
+(`stack-introspection.yaml`'s `billing` upstream has no other `auth` key
+to merge with; add it directly under `billing:`, sibling to `timeout_ms`
+and `introspection`.)
+
+In `tests/integration/test_stack_introspection.py` and
+`tests/integration/test_stack_policy.py`, apply the same two changes
+`test_stack_oauth.py` already has:
+
+1. The `mock_stack` fixture must also bring up `mock-oauth2-server` and wait
+   on its discovery endpoint. Replace both files' `MOCK_HEALTH_URL`/
+   `MOCK_HEALTH_URLS` constant and `mock_stack` body with the exact shape
+   `test_stack_oauth.py` uses in this task (Step 8 above) — a tuple of both
+   health URLs, `docker buildx bake billing-mock`, and
+   `docker compose up -d billing-mock mock-oauth2-server`.
+2. Add the same `_client_secret` autouse fixture `test_stack_oauth.py` has,
+   setting `MOCK_OAUTH2_CLIENT_SECRET`.
+
+- [ ] **Step 11: Run all three retrofitted Docker suites together**
+
+Run:
+```bash
+uv run pytest tests/integration/test_stack_introspection.py \
+              tests/integration/test_stack_policy.py \
+              tests/integration/test_stack_oauth.py \
+              -m integration -v
+```
+Expected: all passing — this is the check that Tasks 3 and 4's tests still
+pass now that billing enforces auth, not just that Task 5's own new test
+does.
+
+- [ ] **Step 12: Commit**
 
 ```bash
 git add docker-compose.yml mocks/billing/pyproject.toml mocks/billing/uv.lock \
         mocks/billing/src/billing_mock/app.py mocks/billing/tests/test_app.py \
-        tests/integration/fixtures/stack-oauth.yaml tests/integration/test_stack_oauth.py
+        tests/integration/fixtures/stack-oauth.yaml tests/integration/test_stack_oauth.py \
+        tests/integration/fixtures/stack-introspection.yaml \
+        tests/integration/fixtures/stack-policy-denied.yaml \
+        tests/integration/fixtures/stack-policy-authorized.yaml \
+        tests/integration/test_stack_introspection.py tests/integration/test_stack_policy.py
 git commit -m "test: client_credentials against a real mock-oauth2-server IdP over Docker"
 ```
 
@@ -1333,3 +1396,15 @@ git commit -m "docs: Docker/mocks testing standard, future-work tracking, P4.1 p
   Task 5's steps say so and tell the implementer to confirm/adjust against
   the pinned version's current docs rather than treat a mismatch as their
   own bug.
+- **Cross-task ordering conflict found and fixed during pre-implementation
+  review (not left to be discovered at the final review):** Task 5's bearer-
+  token check applies to every `mocks/billing` route except `/healthz` and
+  `/openapi.json`, which would have broken Tasks 3's and 4's
+  already-committed fixtures (`stack-introspection.yaml`,
+  `stack-policy-denied.yaml`, `stack-policy-authorized.yaml`) the moment
+  Task 5 landed, since none of them carry a credential for billing. Task 5
+  now has an explicit retrofit step (Step 10) that adds the same
+  `client_credentials` block to all three and re-runs all three Docker
+  suites together as its own verification — mirroring the precedent Task 2
+  already set by retrofitting the pre-existing `stack.yaml` when
+  `mocks/orders` started requiring an API key.
