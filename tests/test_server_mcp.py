@@ -1,8 +1,13 @@
+import dataclasses
+
 import httpx
 import pytest
 from mcp import types
 
+from mcp_portal.auth.principal import Principal
+from mcp_portal.auth.rar import AuthorizationDetail
 from mcp_portal.config.models import UpstreamConfig
+from mcp_portal.config.policy import PolicyConfig
 from mcp_portal.operations import (
     Effect,
     HttpBinding,
@@ -11,6 +16,7 @@ from mcp_portal.operations import (
     ParamLocation,
     Sensitivity,
 )
+from mcp_portal.policy import PolicyEngine
 from mcp_portal.registry import ToolSet
 from mcp_portal.server.mcp import ToolInvoker, annotations_for, to_mcp_tool
 from mcp_portal.transports.http import HttpTransport
@@ -71,6 +77,7 @@ def invoker(handler, operation: Operation) -> ToolInvoker:
     return ToolInvoker(
         toolset=toolset,
         transports={"billing": HttpTransport(client, upstream, None)},
+        policy=PolicyEngine(PolicyConfig(version="1")),
     )
 
 
@@ -193,3 +200,99 @@ async def test_a_non_timeout_transport_failure_produces_an_error_result():
     assert result.is_error is True
     assert "request failed" in result.content[0].text
     assert "connection refused" in result.content[0].text
+
+
+def invoker_with_policy(
+    handler, operation: Operation, policy: PolicyEngine, principal: Principal
+) -> ToolInvoker:
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    upstream = UpstreamConfig(base_url="https://api.example.com")
+    toolset = ToolSet(operations=(operation,), by_name={operation.name: operation})
+    return ToolInvoker(
+        toolset=toolset,
+        transports={"billing": HttpTransport(client, upstream, None)},
+        policy=policy,
+        principal=principal,
+    )
+
+
+@pytest.mark.anyio
+async def test_a_call_with_no_policy_engine_is_unaffected_p1_p2_behavior():
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={})
+
+    result = await invoker(handler, op()).call("list_invoices", {})
+    assert result.is_error is False
+
+
+@pytest.mark.anyio
+async def test_a_denied_call_never_reaches_the_transport():
+    calls = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return httpx.Response(200, json={})
+
+    cfg = PolicyConfig.model_validate(
+        {
+            "version": "1",
+            "rules": [
+                {
+                    "match": {"effect": ["action"]},
+                    "require": {"authorization_details": [{"type": "payment_initiation"}]},
+                }
+            ],
+        }
+    )
+    result = await invoker_with_policy(
+        handler, op(effect=Effect.ACTION), PolicyEngine(cfg), Principal("local", ())
+    ).call("list_invoices", {})
+
+    assert result.is_error is True
+    assert "payment_initiation" in result.content[0].text
+    assert calls == []
+
+
+@pytest.mark.anyio
+async def test_an_allowed_call_proceeds_to_the_transport():
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"ok": True})
+
+    cfg = PolicyConfig.model_validate(
+        {
+            "version": "1",
+            "rules": [
+                {
+                    "match": {"effect": ["action"]},
+                    "require": {"authorization_details": [{"type": "payment_initiation"}]},
+                }
+            ],
+        }
+    )
+    principal = Principal("local", (AuthorizationDetail(type="payment_initiation"),))
+    result = await invoker_with_policy(
+        handler, op(effect=Effect.ACTION), PolicyEngine(cfg), principal
+    ).call("list_invoices", {})
+
+    assert result.is_error is False
+
+
+@pytest.mark.anyio
+async def test_invalid_arguments_are_rejected_before_policy_is_even_consulted():
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={})
+
+    operation = op()
+    schema_op = dataclasses.replace(
+        operation,
+        input_schema={"type": "object", "properties": {"q": {"type": "string"}}, "required": ["q"]},
+    )
+    cfg = PolicyConfig.model_validate(
+        {"version": "1", "defaults": {"unmatched": "deny"}, "rules": []}
+    )
+    result = await invoker_with_policy(
+        handler, schema_op, PolicyEngine(cfg), Principal("local", ())
+    ).call("list_invoices", {})
+
+    assert result.is_error is True
+    assert "invalid arguments" in result.content[0].text

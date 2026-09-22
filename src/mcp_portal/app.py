@@ -8,14 +8,17 @@ from pathlib import Path
 import httpx
 
 from mcp_portal.auth.outbound import credential_for
+from mcp_portal.auth.principal import local_principal
 from mcp_portal.config.loader import (
     ConfigError,
     LoadedConfig,
     credential_headers_for,
 )
 from mcp_portal.config.models import HTTP_URL_PATTERN, Config
+from mcp_portal.config.policy import PolicyConfig, PolicyDefaults
 from mcp_portal.naming import NameCollisionError
 from mcp_portal.operations import Effect, Operation
+from mcp_portal.policy import PolicyEngine
 from mcp_portal.registry import build_toolset
 from mcp_portal.server.mcp import ToolInvoker
 from mcp_portal.sources.explicit import ExplicitSource
@@ -116,6 +119,22 @@ def build_app(loaded: LoadedConfig) -> App:
             ", ".join(risky) or "(none)",
         )
 
+    policy_config = loaded.policy or PolicyConfig(version="1", defaults=PolicyDefaults())
+    policy = PolicyEngine(policy_config)
+    for warning in policy.dead_rule_warnings(toolset.operations):
+        log.warning("%s", warning)
+
+    principal = local_principal(config.auth.local_principal)
+    # Guardrail, not a security boundary (§8): anyone who can launch this
+    # process can already edit the config or call the upstream directly.
+    log.info(
+        "local principal in effect for stdio: %d self-asserted authorization "
+        "detail(s); %d policy rule(s) active. This is a guardrail against an "
+        "over-eager agent, not a security boundary.",
+        len(principal.authorization_details),
+        len(policy_config.rules),
+    )
+
     clients: list[httpx.AsyncClient] = []
     transports = {}
     for key, upstream in config.upstreams.items():
@@ -129,7 +148,7 @@ def build_app(loaded: LoadedConfig) -> App:
 
     log.info("serving %d tool(s) from %d upstream(s)", len(toolset.operations), len(transports))
     return App(
-        invoker=ToolInvoker(toolset, transports),
+        invoker=ToolInvoker(toolset, transports, policy=policy, principal=principal),
         warnings=toolset.warnings,
         _clients=clients,
     )

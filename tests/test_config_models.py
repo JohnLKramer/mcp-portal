@@ -45,10 +45,10 @@ def test_unknown_version_is_rejected():
 
 
 def test_unknown_top_level_field_is_rejected():
-    payload = MINIMAL | {"policy": {"file": "./p.yaml"}}
+    payload = MINIMAL | {"unknown_field": {"file": "./p.yaml"}}
     with pytest.raises(ValidationError) as exc:
         Config.model_validate(payload)
-    assert "policy" in str(exc.value)
+    assert "unknown_field" in str(exc.value)
 
 
 def test_literal_secret_is_rejected():
@@ -228,3 +228,31 @@ def test_openapi_introspection_defaults():
     assert openapi.include_deprecated is False
     assert openapi.allow_external_refs is False
     assert openapi.allowed_hosts == []
+
+
+def test_auth_and_policy_are_both_optional():
+    cfg = Config.model_validate(MINIMAL)
+    assert cfg.auth.local_principal.authorization_details == []
+    assert cfg.policy is None
+
+
+def test_local_principal_accepts_a_list_of_raw_authorization_details():
+    payload = MINIMAL | {
+        "auth": {
+            "local_principal": {
+                "authorization_details": [{"type": "payment_initiation", "actions": ["initiate"]}]
+            }
+        }
+    }
+    cfg = Config.model_validate(payload)
+    assert cfg.auth.local_principal.authorization_details[0]["type"] == "payment_initiation"
+
+
+def test_policy_file_is_a_bare_path_string():
+    cfg = Config.model_validate(MINIMAL | {"policy": {"file": "./rar-policy.yaml"}})
+    assert cfg.policy.file == "./rar-policy.yaml"
+
+
+def test_auth_rejects_unknown_fields():
+    with pytest.raises(ValidationError):
+        Config.model_validate(MINIMAL | {"auth": {"inbound": {"enabled": True}}})

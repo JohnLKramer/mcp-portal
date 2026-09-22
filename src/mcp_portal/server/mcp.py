@@ -12,7 +12,9 @@ import httpx
 import jsonschema
 from mcp import types
 
+from mcp_portal.auth.principal import Principal
 from mcp_portal.operations import Effect, Operation
+from mcp_portal.policy import PolicyEngine
 from mcp_portal.registry import ToolSet
 from mcp_portal.transports.http import HttpTransport, RequestBuildError
 
@@ -53,9 +55,17 @@ def _error(message: str) -> types.CallToolResult:
 
 
 class ToolInvoker:
-    def __init__(self, toolset: ToolSet, transports: Mapping[str, HttpTransport]) -> None:
+    def __init__(
+        self,
+        toolset: ToolSet,
+        transports: Mapping[str, HttpTransport],
+        policy: PolicyEngine,
+        principal: Principal | None = None,
+    ) -> None:
         self._toolset = toolset
         self._transports = transports
+        self._policy = policy
+        self._principal = principal if principal is not None else Principal("local", ())
 
     def tools(self) -> list[types.Tool]:
         return [to_mcp_tool(op) for op in self._toolset.operations]
@@ -72,6 +82,13 @@ class ToolInvoker:
             field = ".".join(str(p) for p in exc.absolute_path)
             where = f" at {field}" if field else ""
             return _error(f"invalid arguments for {name!r}{where}: {exc.message}")
+
+        decision = self._policy.evaluate(operation, self._principal)
+        if not decision.allowed:
+            missing = ", ".join(d.type for d in decision.missing) or "policy default is deny"
+            # Never the token/principal contents (§10) — only which
+            # requirement type was missing.
+            return _error(f"authorization denied for {name!r}: missing {missing}")
 
         transport = self._transports.get(operation.upstream)
         if transport is None:

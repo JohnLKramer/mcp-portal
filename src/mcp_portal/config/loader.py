@@ -15,7 +15,8 @@ from typing import Any
 from pydantic import ValidationError
 from ruamel.yaml import YAML
 
-from mcp_portal.config.models import SECRET_REF_PATTERN, Config
+from mcp_portal.config.models import SECRET_REF_PATTERN, Config, PolicyFileConfig
+from mcp_portal.config.policy import PolicyConfig
 from mcp_portal.operations import HttpBinding, Operation, ParamLocation
 
 _SECRET_RE = re.compile(SECRET_REF_PATTERN)
@@ -51,6 +52,7 @@ class LoadedConfig:
     config: Config
     base_dir: Path
     secrets: dict[str, str]
+    policy: PolicyConfig | None = None
 
 
 def resolve_secret(ref: str, base_dir: Path) -> str:
@@ -162,6 +164,19 @@ def _read(path: Path) -> Any:
         raise ConfigError(f"invalid JSON in {path}: {exc}") from exc
 
 
+def load_policy_file(policy: PolicyFileConfig, base_dir: Path) -> PolicyConfig:
+    """Load and validate the RAR policy file, resolved relative to `base_dir` —
+    the directory containing the *main* config file, per §5, so a config
+    behaves identically regardless of where the process is launched from."""
+    path = Path(policy.file)
+    resolved = path if path.is_absolute() else base_dir / path
+    raw = _read(resolved)
+    try:
+        return PolicyConfig.model_validate(raw)
+    except ValidationError as exc:
+        raise ConfigError(f"invalid policy file {resolved}:\n{exc}") from exc
+
+
 def load_config(path: Path) -> LoadedConfig:
     path = path.resolve()
     base_dir = path.parent
@@ -177,4 +192,6 @@ def load_config(path: Path) -> LoadedConfig:
     secrets: dict[str, str] = {}
     _collect_secrets(raw, base_dir, secrets)
 
-    return LoadedConfig(config=config, base_dir=base_dir, secrets=secrets)
+    policy = load_policy_file(config.policy, base_dir) if config.policy is not None else None
+
+    return LoadedConfig(config=config, base_dir=base_dir, secrets=secrets, policy=policy)

@@ -1,0 +1,12 @@
+version: "1"
+defaults:
+  unmatched: allow
+rules:
+  - match:
+      tags: [billing]
+      effect: [action]
+    require:
+      authorization_details:
+        - type: payment_initiation
+          actions: [initiate]
+          locations: ["https://api.example.com/v1/payments"]
