@@ -21,7 +21,7 @@ from mcp_portal.operations import HttpBinding, Operation, ParamLocation
 _SECRET_RE = re.compile(SECRET_REF_PATTERN)
 
 # A model-supplied Authorization header would bypass the outbound broker entirely,
-# turning the sidecar into an open proxy for whatever credential the model invents.
+# turning the gateway into an open proxy for whatever credential the model invents.
 # The rest are hop-by-hop or routing headers that let a caller reshape the request.
 DENYLISTED_HEADERS = frozenset(
     {

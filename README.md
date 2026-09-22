@@ -1,6 +1,6 @@
 # mcp-portal
 
-An MCP sidecar for HTTP services. Point it at an API, get MCP tools.
+An MCP gateway for HTTP services. Point it at an API, get MCP tools.
 
 **Status: P1.** Explicit config over stdio with a static credential. OpenAPI
 introspection, RAR policy, OAuth, and the HTTP transport land in later phases —
