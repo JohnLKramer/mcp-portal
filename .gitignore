@@ -219,3 +219,9 @@ __marimo__/
 
 # Subagent-driven-development scratch workspace
 .superpowers/
+
+# Local-only planning/spec artifacts (never checked in to this public repo)
+docs/superpowers/
+nimbalyst-local/
+scratch/
+.claude/
