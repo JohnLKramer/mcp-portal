@@ -925,7 +925,7 @@ phase depends only on phases before it, and each ends with something runnable.
 | **P2** | `sources/openapi`, dialect conversion, `x-mcp-*`, `registry` mode posture | Point it at an OpenAPI URL. Adds `introspect-safe` and `introspect-unsafe`. |
 | **P3** | `config/policy`, `auth/rar`, `policy`, local principal | RAR enforcement, working under stdio with a locally asserted principal. |
 | **P4** | `auth/outbound` (`client_credentials`, `token_exchange`, cache), `auth/inbound`, `server/http` | The full broker over streamable HTTP. |
-| **P4.1** | `Dockerfile.base`, `docker-bake.hcl`, `mocks/*` auth, `tests/integration/fixtures/*` | Every phase P1–P4 has a Docker-driven integration test proving its headline capability, including real backend-side auth enforcement. |
+| **P4.1** | `Dockerfile.base`, `docker-bake.hcl`, `mocks/*` auth, `tests/integration/fixtures/*` | Every phase P1–P4a has a Docker-driven integration test proving its headline capability, including real backend-side auth enforcement. |
 | **P5** | `configure/survey`, `configure/reconcile` | The interactive authoring workflow. |
 
 Corrections from the previous draft, all dependency violations: `naming` and

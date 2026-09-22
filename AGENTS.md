@@ -51,6 +51,7 @@ uv run mcp-portal validate --config <path>   # validate config, list tools
 uv run mcp-portal serve    --config <path>   # serve over stdio
 uv run pytest                        # unit tests (excludes integration)
 uv run pytest -m integration         # integration tests (requires Docker)
+docker buildx bake                   # build all Docker images (main app + mocks)
 uv run ruff format .                 # format
 uv run ruff check .                  # lint
 uv run mypy src                      # type-check
@@ -117,7 +118,7 @@ live in `tests/integration/fixtures/` (`stack.yaml`, `stack-introspection.yaml`,
 | RAR (RFC 9396) | hand-rolled (`auth/rar.py`, `policy.py`) — small predicate, no library |
 | Streaming HTTP transport | `mcp` SDK (`StreamableHTTPSessionManager`, P4b) |
 | stdio transport | `mcp` SDK (`stdio_server`, P1) |
-| JWT | `pyjwt[crypto]` (P4b) |
+| JWT | `pyjwt[crypto]` (P4b; also mocks/billing in P4.1) |
 | Mock HTTP backends | Flask + `gunicorn` |
 | Mock OAuth IdP | `navikt/mock-oauth2-server` |
 | gRPC | not yet decided — undesigned, see `future-work.md` / design spec §13 |

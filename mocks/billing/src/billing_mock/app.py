@@ -11,6 +11,11 @@ _OAUTH_ISSUER = os.environ.get("MOCK_OAUTH2_ISSUER", "http://mock-oauth2-server:
 _jwks_client = jwt.PyJWKClient(f"{_OAUTH_ISSUER}/jwks")
 
 
+# Every tests/integration/fixtures/*.yaml upstream pointed at this mock must
+# carry an outbound.mode: client_credentials credential (stack.yaml,
+# stack-introspection.yaml, stack-policy-denied.yaml,
+# stack-policy-authorized.yaml, stack-oauth.yaml) — missing one is a silent
+# 401 regression, not a compile-time error.
 @app.before_request
 def _require_bearer_token():
     if request.path in ("/healthz", "/openapi.json"):
