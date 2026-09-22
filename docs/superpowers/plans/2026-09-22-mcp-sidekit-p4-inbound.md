@@ -84,6 +84,22 @@ first to import it directly.
   disabled but permitted** (unauthenticated-http case) — same startup log
   banner style as `introspect-unsafe`, naming the bind address and every
   exposed tool (§8).
+- **`TokenExchangeSource`'s cached TTL must be capped at the subject
+  token's own expiry** before Task 7 (or whichever task first makes
+  `token_exchange` reachable from config) is considered complete. This is a
+  carry-over from the P4-outbound plan's final review: that plan
+  deliberately built `TokenExchangeSource` treating `subject_token` as an
+  opaque string (no JWT-decoding knowledge, by design — see that plan's
+  Architecture section), so it could only cache on `expires_in` from the
+  *exchanged* token's response, never `min(exchanged exp, subject exp)` per
+  §8's cache table ("Exchanged TTL never exceeds subject `exp`" is also
+  a named §11 security regression test). This plan is the first place a
+  decoded subject-token expiry exists (from `JwtTokenVerifier`/
+  `principal_from_access_token`, Tasks 3–4) — thread that expiry into the
+  TTL calculation wherever `TokenExchangeSource` is finally invoked, rather
+  than leaving the exchanged-token-only TTL in place. Do not treat this as
+  optional polish: an uncapped exchanged token can outlive the inbound
+  grant it derives from.
 - **Every task ends with `uv run ruff format .`, `uv run ruff check .`,
   `uv run mypy src`, and the task's own test file passing** before the
   commit step. Do not run the full suite mid-task; the final task is where
