@@ -7,7 +7,7 @@ from pathlib import Path
 
 import httpx
 
-from mcp_portal.auth.outbound import ClientCredentialsSource, credential_for
+from mcp_portal.auth.outbound import ClientCredentialsSource, TokenExchangeSource, credential_for
 from mcp_portal.auth.principal import local_principal
 from mcp_portal.auth.token_cache import TokenCache
 from mcp_portal.config.loader import (
@@ -148,6 +148,27 @@ def build_app(loaded: LoadedConfig) -> App:
             credential_source = ClientCredentialsSource(
                 outbound=outbound,
                 secrets=loaded.secrets,
+                client=client,
+                cache=token_cache,
+                upstream_key=key,
+            )
+        elif outbound.mode == "token_exchange":
+            assert outbound.token_endpoint is not None
+            assert outbound.client_id is not None
+            assert outbound.client_secret is not None
+            client_secret = loaded.secrets.get(outbound.client_secret)
+            if client_secret is None:
+                raise ConfigError(
+                    f"secret reference {outbound.client_secret!r} was not resolved at load time"
+                )
+            credential_source = TokenExchangeSource(
+                token_endpoint=outbound.token_endpoint,
+                client_id=outbound.client_id,
+                client_secret=client_secret,
+                audience=outbound.audience,
+                resource=outbound.resource,
+                requested_token_type=outbound.requested_token_type,
+                scopes=outbound.scopes,
                 client=client,
                 cache=token_cache,
                 upstream_key=key,

@@ -85,3 +85,46 @@ async def test_carried_details_are_included_in_the_cache_key_and_the_request():
 
     detail = AuthorizationDetail(type="payment_initiation")
     await source(handler).get(carry=(detail,), subject_token="token-a")
+
+
+@pytest.mark.anyio
+async def test_ttl_is_capped_at_the_subject_tokens_own_expiry():
+    import time
+
+    calls = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(1)
+        return httpx.Response(200, json={"access_token": f"tok-{len(calls)}", "expires_in": 900})
+
+    src = source(handler)
+    expired_subject = int(time.time()) - 10  # already expired
+
+    first = await src.get(
+        carry=(), subject_token="inbound-jwt", subject_token_expires_at=expired_subject
+    )
+    second = await src.get(
+        carry=(), subject_token="inbound-jwt", subject_token_expires_at=expired_subject
+    )
+
+    # An already-expired subject token must force a re-exchange every call —
+    # the 900s expires_in from the IdP is never honored past the subject's
+    # own expiry.
+    assert first.value != second.value
+    assert len(calls) == 2
+
+
+@pytest.mark.anyio
+async def test_ttl_is_unaffected_when_subject_expiry_is_not_supplied():
+    calls = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(1)
+        return httpx.Response(200, json={"access_token": f"tok-{len(calls)}", "expires_in": 900})
+
+    src = source(handler)
+    first = await src.get(carry=(), subject_token="inbound-jwt")
+    second = await src.get(carry=(), subject_token="inbound-jwt")
+
+    assert first.value == second.value
+    assert len(calls) == 1

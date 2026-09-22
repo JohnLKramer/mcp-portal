@@ -373,6 +373,48 @@ async def test_client_credentials_upstream_builds_a_dynamic_credential_source(
         await app.aclose()
 
 
+@pytest.mark.anyio
+async def test_token_exchange_upstream_builds_a_token_exchange_credential_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setenv("BILLING_CLIENT_SECRET", "secret-value")
+    config = CONFIG | {
+        "server": {"name": "billing-portal", "transport": "http"},
+        "auth": {
+            "inbound": {
+                "enabled": True,
+                "issuer": "https://idp.example.com",
+                "audience": "https://api.example.com/mcp",
+            }
+        },
+        "upstreams": {
+            "billing": {
+                "base_url": "https://api.example.com",
+                "auth": {
+                    "outbound": {
+                        "mode": "token_exchange",
+                        "token_endpoint": "https://idp.example.com/oauth2/token",
+                        "client_id": "sidekit-billing",
+                        "client_secret": "${env:BILLING_CLIENT_SECRET}",
+                        "audience": "https://api.example.com",
+                    }
+                },
+            }
+        },
+    }
+    from mcp_portal.auth.outbound import TokenExchangeSource
+
+    loaded = load_config(_write_config(tmp_path, config))
+    app = build_app(loaded)
+    try:
+        transport = app.invoker._transports[
+            "billing"
+        ]  # test-only reach-through, matches this file's existing style
+        assert isinstance(transport._credential_source, TokenExchangeSource)
+    finally:
+        await app.aclose()
+
+
 def test_build_app_logs_a_dead_policy_rule_warning(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog
 ):
