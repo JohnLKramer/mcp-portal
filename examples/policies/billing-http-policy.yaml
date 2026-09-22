@@ -1,0 +1,22 @@
+# RAR policy for examples/billing-http.yaml.
+#
+# `initiate_payment` is a POST (effect: action), tagged `billing`, so this
+# rule matches it: a caller must present an `authorization_details` entry
+# covering `payment_initiation`/`initiate` on the payments endpoint, and
+# only that accumulated requirement — not whatever broader grant the
+# caller's own token happens to present — is carried into the outbound
+# `token_exchange` call (`outbound.carry: true`).
+version: "1"
+defaults:
+  unmatched: allow
+rules:
+  - match:
+      tags: [billing]
+      effect: [action]
+    require:
+      authorization_details:
+        - type: payment_initiation
+          actions: [initiate]
+          locations: ["https://api.example.com/v1/payments"]
+    outbound:
+      carry: true

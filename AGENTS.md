@@ -2,11 +2,13 @@
 
 mcp-portal is an MCP (Model Context Protocol) gateway that exposes HTTP/OpenAPI
 backend endpoints as MCP tools, with explicit opt-in exposure and RAR
-(RFC 9396) policy enforcement on every call. It serves over stdio to AI
-clients (Claude Desktop, Claude Code, etc.). Currently P3: OpenAPI
-introspection, `x-mcp-*` opt-in annotations, and RAR policy enforcement are
-implemented; HTTP transport, inbound/outbound OAuth, gRPC/GraphQL backends,
-JSONPath response filtering, and rate limiting are not.
+(RFC 9396) policy enforcement on every call. It serves over stdio or
+streamable HTTP to AI clients (Claude Desktop, Claude Code, etc.). Currently
+P4: OpenAPI introspection, `x-mcp-*` opt-in annotations, RAR policy
+enforcement, the HTTP transport, inbound OAuth (JWT validation, JWKS,
+RFC 9728 discovery), and outbound `client_credentials`/`token_exchange` are
+implemented; gRPC/GraphQL backends, JSONPath response filtering, and rate
+limiting are not.
 
 **Tech stack:** Python, uv, Pydantic, httpx, ruamel.yaml, jsonschema, the `mcp`
 SDK, pytest, ruff, mypy, Hatchling.
@@ -19,10 +21,13 @@ SDK, pytest, ruff, mypy, Hatchling.
   - `classify.py`, `naming.py`, `operations.py`, `policy.py`, `registry.py` —
     operation classification, name generation, the `Operation` model, RAR
     policy engine, and toolset assembly.
-  - `auth/` — `principal.py` (locally-asserted principal), `rar.py` (RAR
-    coverage predicate), `outbound.py` (outbound credential handling —
-    `static`, `client_credentials`, `token_exchange` sources), `token_cache.py`
-    (shared in-memory token cache for dynamic outbound credentials).
+  - `auth/` — `principal.py` (locally-asserted principal, and the
+    HTTP-bearer-token-derived principal for `transport: http`), `rar.py` (RAR
+    coverage predicate), `inbound.py` (RFC 9068 JWT verification, JWKS/AS
+    discovery), `token_cache.py` (shared in-memory token cache, used by both
+    inbound JWKS caching and dynamic outbound credentials), `outbound.py`
+    (outbound credential handling — `static`, `client_credentials`,
+    `token_exchange` sources).
   - `config/` — `models.py` (Pydantic config models), `loader.py` (load +
     validate config), `policy.py` (policy-file models), `schema.py`
     (generates `schema/config-v1.schema.json`).
@@ -31,7 +36,9 @@ SDK, pytest, ruff, mypy, Hatchling.
     `refs.py` (OpenAPI introspection), `merge.py` (merges sources by `id`),
     `flatten.py`.
   - `server/` — `mcp.py` (`ToolInvoker`, MCP server wiring), `stdio.py`
-    (stdio transport entrypoint).
+    (stdio transport entrypoint), `http.py` (streamable HTTP transport:
+    `mcp` SDK ASGI app assembly, inbound bearer-token verification wiring,
+    per-request principal resolution).
   - `transports/` — `base.py`, `http.py` (upstream HTTP execution, response
     size capping/truncation).
 - `tests/` — unit tests (one file per source module) plus `integration/`
@@ -76,10 +83,23 @@ Config load → operation sourcing → merge → classify → policy check → e
 3. `classify.py` derives `effect` from HTTP method and applies `sensitivity`
    classification rules; `registry.py` selects and builds the toolset;
    `naming.py` generates tool names (never a stable match key — see below).
-4. `server/mcp.py`'s `ToolInvoker` validates arguments, then calls `policy.py`
-   (the RAR engine) with the `auth/principal.py`-built local principal —
-   denial happens here, before the upstream is ever called — then executes
-   via `transports/http.py`.
+4. Establish the principal — this varies by transport. Under stdio, it is
+   always the self-asserted local principal (`auth/principal.py`'s
+   `local_principal`) — a guardrail, not a security boundary. Under
+   `transport: http`, `server/http.py` resolves it per request: with
+   `auth.inbound.enabled`, `auth/inbound.py`'s `JwtTokenVerifier` validates
+   the caller's bearer JWT (RFC 9068, JWKS-backed) and
+   `principal_from_access_token` builds a principal from its
+   `authorization_details` claim and the token itself (kept as
+   `subject_token` for a later exchange); with inbound auth disabled, HTTP
+   falls back to the same local principal as stdio.
+5. `server/mcp.py`'s `ToolInvoker` validates arguments, then calls `policy.py`
+   (the RAR engine) with that principal — denial happens here, before the
+   upstream is ever called — then executes via `transports/http.py`, which
+   asks the upstream's `auth/outbound.py` credential source (`static`,
+   `client_credentials`, or `token_exchange`) for a credential, passing along
+   any policy-`carry`d `authorization_details` and, for `token_exchange`, the
+   inbound `subject_token` to exchange (RFC 8693).
 
 Key invariants (see the local, gitignored design spec under
 `docs/superpowers/specs/` for the full rationale):
@@ -94,6 +114,14 @@ Key invariants (see the local, gitignored design spec under
 - **Config problems fail at `validate`/startup, never mid-call.**
 - **Policy rules accumulate** (union of matching rules' `require`); they are
   never first-match-wins.
+- **`transport: http` with `auth.inbound.enabled: false` on a non-loopback
+  host is a startup error** unless `auth.inbound.allow_unauthenticated_http`
+  is explicitly set — an unauthenticated endpoint holding a service
+  credential is never a silent default.
+- **`outbound.mode: token_exchange` requires `transport: http` with
+  `auth.inbound.enabled: true`** — a startup error otherwise, since there is
+  no inbound `subject_token` to exchange under any other transport/auth
+  combination.
 
 ## Testing
 
@@ -104,7 +132,10 @@ uv run pytest -m integration   # integration tests, requires Docker
 
 One test file per source module under `tests/` (e.g. `test_registry.py` for
 `registry.py`). `tests/test_p3_end_to_end.py` exercises the full RAR
-enforcement path against the design's billing example. Golden fixtures for
+enforcement path against the design's billing example over stdio;
+`tests/test_p4_end_to_end.py` does the same over streamable HTTP, adding
+inbound JWT verification and an outbound `token_exchange` call. Golden
+fixtures for
 OpenAPI parsing live under `tests/fixtures/`; integration test Docker fixtures
 live in `tests/integration/fixtures/` (`stack.yaml`, `stack-introspection.yaml`,
 `stack-policy-denied.yaml`, `stack-policy-authorized.yaml`, `stack-oauth.yaml`).
