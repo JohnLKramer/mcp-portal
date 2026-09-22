@@ -32,6 +32,29 @@ def render_config(
             continue
         op = decision.operation
         assert isinstance(op.binding, HttpBinding)
+        parameters = [
+            {
+                "arg": p.arg,
+                "in": p.location.value,
+                "wire_name": p.wire_name,
+                "required": p.required,
+                "schema": dict(p.schema),
+                "style": p.style,
+                "explode": p.explode,
+            }
+            for p in op.binding.parameters
+        ]
+        binding_dict: dict[str, Any] = {
+            "method": op.binding.method,
+            "path": op.binding.path,
+            "parameters": parameters,
+        }
+        if op.binding.body is not None:
+            binding_dict["body"] = {
+                "content_type": op.binding.body.content_type,
+                "mode": op.binding.body.mode.value,
+                "schema": dict(op.binding.body.schema),
+            }
         operations.append(
             {
                 "id": op.id,
@@ -41,7 +64,7 @@ def render_config(
                 "group_tags": list(op.group_tags),
                 "effect": decision.effect.value,
                 "sensitivity": decision.sensitivity.value,
-                "binding": {"method": op.binding.method, "path": op.binding.path},
+                "binding": binding_dict,
             }
         )
     return {
@@ -141,5 +164,6 @@ def write_with_confirmation(path: Path, rendered: dict[str, Any], prompter: Prom
     if not prompter.confirm(f"write {path}?", default=True):
         return False
 
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(new_text)
     return True

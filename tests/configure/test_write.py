@@ -98,3 +98,67 @@ def test_write_with_confirmation_round_trips_yaml_preserving_comments(tmp_path: 
     text = path.read_text()
     assert "# a hand-written comment" in text
     assert "extra: field" in text
+
+
+def test_render_config_preserves_parameters_and_body():
+    from mcp_portal.operations import BodySpec, Parameter, ParamLocation
+
+    op = Operation(
+        id="create_invoice",
+        upstream="billing",
+        name="create_invoice",
+        title="create_invoice",
+        description="create_invoice",
+        group_tags=("billing",),
+        effect=Effect.ACTION,
+        sensitivity=Sensitivity.NORMAL,
+        input_schema={"type": "object", "properties": {}},
+        binding=HttpBinding(
+            method="POST",
+            path="/invoices/{id}",
+            parameters=(
+                Parameter(
+                    arg="id",
+                    location=ParamLocation.PATH,
+                    wire_name="id",
+                    required=True,
+                    schema={"type": "string"},
+                ),
+            ),
+            body=BodySpec(
+                content_type="application/json",
+                schema={"type": "object", "properties": {"amount": {"type": "integer"}}},
+            ),
+        ),
+    )
+    decision = OperationDecision(
+        operation=op,
+        exposed=True,
+        effect=Effect.ACTION,
+        sensitivity=Sensitivity.NORMAL,
+        require=None,
+    )
+    rendered = render_config(
+        [decision], server_name="s", upstream_base_urls={"billing": "https://api.example.com"}
+    )
+
+    binding = rendered["operations"][0]["binding"]
+    assert binding["parameters"][0]["arg"] == "id"
+    assert binding["parameters"][0]["in"] == "path"
+    assert binding["parameters"][0]["required"] is True
+    assert binding["body"]["schema"]["properties"]["amount"]["type"] == "integer"
+
+    # The rendered dict must actually be loadable as a real Config.
+    from mcp_portal.config.models import Config
+
+    Config.model_validate(rendered)
+
+
+def test_write_with_confirmation_creates_missing_parent_directories(tmp_path: Path):
+    path = tmp_path / "nested" / "dir" / "config.json"
+    prompter = ScriptedPrompter(confirms=[True], texts=[])
+
+    wrote = write_with_confirmation(path, {"version": "1"}, prompter)
+
+    assert wrote is True
+    assert json.loads(path.read_text()) == {"version": "1"}
