@@ -7,6 +7,7 @@ import httpx
 import pytest
 
 from mcp_portal.app import build_app
+from mcp_portal.auth.outbound import ClientCredentialsSource
 from mcp_portal.config.loader import ConfigError, load_config
 
 FIXTURES = Path(__file__).parent / "fixtures" / "openapi"
@@ -341,6 +342,35 @@ async def test_build_app_wires_a_policy_file_and_enforces_it(
         await app.aclose()
     assert result.is_error is True
     assert "payment_initiation" in result.content[0].text
+
+
+@pytest.mark.anyio
+async def test_client_credentials_upstream_builds_a_dynamic_credential_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setenv("BILLING_CLIENT_SECRET", "shh")
+    payload = CONFIG | {
+        "upstreams": {
+            "billing": {
+                "base_url": "https://api.example.com",
+                "auth": {
+                    "outbound": {
+                        "mode": "client_credentials",
+                        "token_endpoint": "https://idp.example.com/oauth2/token",
+                        "client_id": "sidekit-billing",
+                        "client_secret": "${env:BILLING_CLIENT_SECRET}",
+                    }
+                },
+            }
+        }
+    }
+    loaded = load_config(_write_config(tmp_path, payload))
+    app = build_app(loaded)
+    try:
+        transport = app.invoker._transports["billing"]
+        assert isinstance(transport._credential_source, ClientCredentialsSource)
+    finally:
+        await app.aclose()
 
 
 def test_build_app_logs_a_dead_policy_rule_warning(

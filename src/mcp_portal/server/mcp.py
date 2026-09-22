@@ -95,7 +95,7 @@ class ToolInvoker:
             return _error(f"no transport configured for upstream {operation.upstream!r}")
 
         try:
-            response = await transport.execute(operation, args)
+            response = await transport.execute(operation, args, carry=decision.carry)
         except RequestBuildError as exc:
             return _error(f"invalid arguments for {name!r}: {exc}")
         except httpx.TimeoutException:

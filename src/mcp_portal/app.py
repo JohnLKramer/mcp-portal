@@ -7,8 +7,9 @@ from pathlib import Path
 
 import httpx
 
-from mcp_portal.auth.outbound import credential_for
+from mcp_portal.auth.outbound import ClientCredentialsSource, credential_for
 from mcp_portal.auth.principal import local_principal
+from mcp_portal.auth.token_cache import TokenCache
 from mcp_portal.config.loader import (
     ConfigError,
     LoadedConfig,
@@ -26,7 +27,7 @@ from mcp_portal.sources.merge import merge_operations
 from mcp_portal.sources.openapi import OpenApiSource, load_document
 from mcp_portal.sources.openapi_document import OpenApiError
 from mcp_portal.sources.refs import RefError
-from mcp_portal.transports.http import HttpTransport, StaticCredentialSource
+from mcp_portal.transports.http import CredentialSource, HttpTransport, StaticCredentialSource
 
 log = logging.getLogger("mcp_portal")
 
@@ -135,17 +136,28 @@ def build_app(loaded: LoadedConfig) -> App:
         len(policy_config.rules),
     )
 
+    token_cache = TokenCache()
     clients: list[httpx.AsyncClient] = []
     transports = {}
     for key, upstream in config.upstreams.items():
         client = httpx.AsyncClient()
         clients.append(client)
+        outbound = upstream.auth.outbound
+        credential_source: CredentialSource
+        if outbound.mode == "client_credentials":
+            credential_source = ClientCredentialsSource(
+                outbound=outbound,
+                secrets=loaded.secrets,
+                client=client,
+                cache=token_cache,
+                upstream_key=key,
+            )
+        else:
+            credential_source = StaticCredentialSource(credential_for(outbound, loaded.secrets))
         transports[key] = HttpTransport(
             client=client,
             upstream=upstream.model_copy(update={"base_url": resolved_base_urls[key]}),
-            credential_source=StaticCredentialSource(
-                credential_for(upstream.auth.outbound, loaded.secrets)
-            ),
+            credential_source=credential_source,
         )
 
     log.info("serving %d tool(s) from %d upstream(s)", len(toolset.operations), len(transports))

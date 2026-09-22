@@ -20,7 +20,9 @@ SDK, pytest, ruff, mypy, Hatchling.
     operation classification, name generation, the `Operation` model, RAR
     policy engine, and toolset assembly.
   - `auth/` — `principal.py` (locally-asserted principal), `rar.py` (RAR
-    coverage predicate), `outbound.py` (outbound credential handling).
+    coverage predicate), `outbound.py` (outbound credential handling —
+    `static`, `client_credentials`, `token_exchange` sources), `token_cache.py`
+    (shared in-memory token cache for dynamic outbound credentials).
   - `config/` — `models.py` (Pydantic config models), `loader.py` (load +
     validate config), `policy.py` (policy-file models), `schema.py`
     (generates `schema/config-v1.schema.json`).

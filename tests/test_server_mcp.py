@@ -278,6 +278,47 @@ async def test_an_allowed_call_proceeds_to_the_transport():
 
 
 @pytest.mark.anyio
+async def test_a_carrying_rules_required_details_reach_the_credential_source():
+    seen_carry = []
+
+    class RecordingSource:
+        async def get(self, carry, subject_token=None):
+            seen_carry.append(carry)
+            return None
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={})
+
+    cfg = PolicyConfig.model_validate(
+        {
+            "version": "1",
+            "rules": [
+                {
+                    "match": {"tags": ["billing"]},
+                    "require": {"authorization_details": [{"type": "payment_initiation"}]},
+                    "outbound": {"carry": True},
+                }
+            ],
+        }
+    )
+    presented = AuthorizationDetail(type="payment_initiation")
+    toolset = ToolSet(operations=(op(),), by_name={op().name: op()})
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    invoker = ToolInvoker(
+        toolset=toolset,
+        transports={
+            "billing": HttpTransport(
+                client, UpstreamConfig(base_url="https://api.example.com"), RecordingSource()
+            )
+        },
+        policy=PolicyEngine(cfg),
+        principal=Principal("local", (presented,)),
+    )
+    await invoker.call("list_invoices", {})
+    assert seen_carry == [(presented,)]
+
+
+@pytest.mark.anyio
 async def test_invalid_arguments_are_rejected_before_policy_is_even_consulted():
     async def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={})
