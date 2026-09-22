@@ -60,8 +60,24 @@ class IntrospectionConfig(Base):
     openapi: OpenApiIntrospectionConfig
 
 
+LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+
+
+class HttpServerConfig(Base):
+    host: str = "127.0.0.1"
+    port: int = Field(default=8443, gt=0, lt=65536)
+    path: str = "/mcp"
+    allowed_origins: list[str] = Field(default_factory=list)
+    # The `Host` header values real clients send, which need not be the bind
+    # address: behind a reverse proxy, or bound to `0.0.0.0`, no client ever
+    # sends `Host: 0.0.0.0`. Without this an operator using the sanctioned
+    # non-loopback escape hatch has no way to name their public hostname, and
+    # the SDK's DNS-rebinding defense rejects every request with a 421.
+    allowed_hosts: list[str] = Field(default_factory=list)
+
+
 class OutboundConfig(Base):
-    mode: Literal["none", "static", "client_credentials"] = "none"
+    mode: Literal["none", "static", "client_credentials", "token_exchange"] = "none"
     header: str = "Authorization"
     scheme: str | None = "Bearer"
     value: SecretRef | None = None
@@ -69,6 +85,9 @@ class OutboundConfig(Base):
     client_id: str | None = None
     client_secret: SecretRef | None = None
     scopes: list[str] = Field(default_factory=list)
+    audience: str | None = None
+    resource: str | None = None
+    requested_token_type: str = "urn:ietf:params:oauth:token-type:access_token"
 
     @model_validator(mode="after")
     def _static_needs_a_value(self) -> Self:
@@ -77,8 +96,8 @@ class OutboundConfig(Base):
         return self
 
     @model_validator(mode="after")
-    def _client_credentials_needs_endpoint_and_client(self) -> Self:
-        if self.mode != "client_credentials":
+    def _dynamic_modes_need_endpoint_and_client(self) -> Self:
+        if self.mode not in ("client_credentials", "token_exchange"):
             return self
         missing = [
             name
@@ -90,7 +109,7 @@ class OutboundConfig(Base):
             if value is None
         ]
         if missing:
-            raise ValueError(f"outbound mode 'client_credentials' requires {missing}")
+            raise ValueError(f"outbound mode {self.mode!r} requires {missing}")
         return self
 
 
@@ -125,7 +144,8 @@ class UpstreamConfig(Base):
 
 class ServerConfig(Base):
     name: str
-    transport: Literal["stdio"] = "stdio"
+    transport: Literal["stdio", "http"] = "stdio"
+    http: HttpServerConfig = Field(default_factory=HttpServerConfig)
 
 
 class ParameterEntry(Base):
@@ -206,8 +226,43 @@ class LocalPrincipalConfig(Base):
     authorization_details: list[dict[str, Any]] = Field(default_factory=list)
 
 
+class InboundAuthConfig(Base):
+    """RFC 9068 access-token validation for `transport: http` (§8).
+
+    `algorithms` intentionally has no way to re-admit `alg: none` — the
+    validator below rejects it even if a future operator adds it by hand.
+    HMAC (`HS*`) is not excluded outright (RFC 9396 does not forbid it and
+    an operator's IdP might legitimately use it), but v1 has no
+    shared-secret config field, so JWKS-only key lookup makes an
+    HS*-allowlisted deployment fail closed rather than succeed via
+    key-confusion.
+    """
+
+    enabled: bool = False
+    issuer: BaseUrl | None = None
+    audience: str | None = None
+    jwks_uri: BaseUrl | None = None
+    required_scopes: list[str] = Field(default_factory=list)
+    algorithms: list[str] = Field(default_factory=lambda: ["RS256", "ES256"])
+    leeway_s: float = Field(default=60.0, ge=0)
+    allow_unauthenticated_http: bool = False
+
+    @model_validator(mode="after")
+    def _enabled_needs_issuer_and_audience(self) -> Self:
+        if self.enabled and (self.issuer is None or self.audience is None):
+            raise ValueError("auth.inbound.enabled requires 'issuer' and 'audience'")
+        return self
+
+    @model_validator(mode="after")
+    def _none_alg_never_allowed(self) -> Self:
+        if "none" in self.algorithms:
+            raise ValueError("'none' may never appear in auth.inbound.algorithms")
+        return self
+
+
 class AuthConfig(Base):
     local_principal: LocalPrincipalConfig = Field(default_factory=LocalPrincipalConfig)
+    inbound: InboundAuthConfig = Field(default_factory=InboundAuthConfig)
 
 
 class PolicyFileConfig(Base):
@@ -252,4 +307,31 @@ class Config(Base):
                     f"upstream(s) {missing} have no 'base_url'; mode 'configured' never "
                     "introspects, so it can never be resolved from a document"
                 )
+        return self
+
+    @model_validator(mode="after")
+    def _unauthenticated_http_is_guarded(self) -> Self:
+        if self.server.transport != "http" or self.auth.inbound.enabled:
+            return self
+        if self.server.http.host in LOOPBACK_HOSTS:
+            return self
+        if self.auth.inbound.allow_unauthenticated_http:
+            return self
+        raise ValueError(
+            "transport 'http' with auth.inbound.enabled=false on a non-loopback host "
+            "is a startup error unless auth.inbound.allow_unauthenticated_http is "
+            "true: it is an unauthenticated endpoint holding a service credential (§8)"
+        )
+
+    @model_validator(mode="after")
+    def _token_exchange_requires_inbound(self) -> Self:
+        exchanging = sorted(
+            k for k, u in self.upstreams.items() if u.auth.outbound.mode == "token_exchange"
+        )
+        if exchanging and not (self.server.transport == "http" and self.auth.inbound.enabled):
+            raise ValueError(
+                f"upstream(s) {exchanging} use outbound mode 'token_exchange', which "
+                "requires transport 'http' with auth.inbound.enabled=true: there is no "
+                "subject_token to exchange otherwise"
+            )
         return self

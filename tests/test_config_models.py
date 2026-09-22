@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from mcp_portal.config.models import Config, OutboundConfig
+from mcp_portal.config.models import AuthConfig, Config, OutboundConfig, ServerConfig
 
 MINIMAL: dict = {
     "version": "1",
@@ -283,3 +283,135 @@ def test_client_credentials_mode_rejects_a_literal_client_secret():
             client_id="sidekit-billing",
             client_secret="not-a-reference",
         )
+
+
+def test_transport_http_defaults_its_own_server_config():
+    cfg = ServerConfig(name="s", transport="http")
+    assert cfg.http.host == "127.0.0.1"
+    assert cfg.http.path == "/mcp"
+    assert cfg.http.allowed_origins == []
+    # Empty by default: a loopback bind needs no operator-supplied Host, since
+    # `_security_settings` allows the loopback spellings itself.
+    assert cfg.http.allowed_hosts == []
+
+
+def test_inbound_disabled_by_default():
+    cfg = Config.model_validate(MINIMAL)
+    assert cfg.auth.inbound.enabled is False
+
+
+def test_inbound_enabled_requires_issuer_and_audience():
+    with pytest.raises(ValidationError):
+        AuthConfig(inbound={"enabled": True})
+
+
+def test_inbound_enabled_validates_with_issuer_and_audience():
+    cfg = AuthConfig(
+        inbound={
+            "enabled": True,
+            "issuer": "https://idp.example.com",
+            "audience": "https://api.example.com/mcp",
+        }
+    )
+    assert cfg.inbound.algorithms == ["RS256", "ES256"]
+    assert cfg.inbound.leeway_s == 60.0
+
+
+def test_inbound_rejects_none_in_algorithms():
+    with pytest.raises(ValidationError):
+        AuthConfig(
+            inbound={
+                "enabled": True,
+                "issuer": "https://idp.example.com",
+                "audience": "https://api.example.com/mcp",
+                "algorithms": ["none"],
+            }
+        )
+
+
+def test_http_transport_on_a_non_loopback_host_without_inbound_is_a_startup_error():
+    payload = MINIMAL | {"server": {"name": "s", "transport": "http", "http": {"host": "0.0.0.0"}}}
+    with pytest.raises(ValidationError):
+        Config.model_validate(payload)
+
+
+def test_http_transport_on_a_non_loopback_host_with_the_escape_hatch_is_allowed():
+    payload = MINIMAL | {
+        "server": {"name": "s", "transport": "http", "http": {"host": "0.0.0.0"}},
+        "auth": {"inbound": {"allow_unauthenticated_http": True}},
+    }
+    Config.model_validate(payload)  # does not raise
+
+
+def test_http_transport_on_loopback_without_inbound_is_allowed():
+    payload = MINIMAL | {"server": {"name": "s", "transport": "http"}}
+    Config.model_validate(payload)  # does not raise
+
+
+def test_token_exchange_under_stdio_is_a_startup_error():
+    payload = MINIMAL | {
+        "upstreams": {
+            "billing": {
+                "base_url": "https://api.example.com",
+                "auth": {
+                    "outbound": {
+                        "mode": "token_exchange",
+                        "token_endpoint": "https://idp.example.com/oauth2/token",
+                        "client_id": "c",
+                        "client_secret": "${env:S}",
+                    }
+                },
+            }
+        }
+    }
+    with pytest.raises(ValidationError):
+        Config.model_validate(payload)
+
+
+def test_token_exchange_with_inbound_disabled_over_http_is_a_startup_error():
+    payload = MINIMAL | {
+        "server": {"name": "s", "transport": "http"},
+        "upstreams": {
+            "billing": {
+                "base_url": "https://api.example.com",
+                "auth": {
+                    "outbound": {
+                        "mode": "token_exchange",
+                        "token_endpoint": "https://idp.example.com/oauth2/token",
+                        "client_id": "c",
+                        "client_secret": "${env:S}",
+                    }
+                },
+            }
+        },
+    }
+    with pytest.raises(ValidationError):
+        Config.model_validate(payload)
+
+
+def test_token_exchange_with_http_and_inbound_enabled_is_valid():
+    payload = MINIMAL | {
+        "server": {"name": "s", "transport": "http"},
+        "auth": {
+            "inbound": {
+                "enabled": True,
+                "issuer": "https://idp.example.com",
+                "audience": "https://api.example.com/mcp",
+            }
+        },
+        "upstreams": {
+            "billing": {
+                "base_url": "https://api.example.com",
+                "auth": {
+                    "outbound": {
+                        "mode": "token_exchange",
+                        "token_endpoint": "https://idp.example.com/oauth2/token",
+                        "client_id": "c",
+                        "client_secret": "${env:S}",
+                        "audience": "https://api.example.com",
+                    }
+                },
+            }
+        },
+    }
+    Config.model_validate(payload)  # does not raise

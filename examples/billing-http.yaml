@@ -1,0 +1,85 @@
+# The streamable-HTTP counterpart to examples/billing.yaml: a bearer-token
+# authenticated gateway that RAR-policy-checks the caller's own JWT, then
+# exchanges (RFC 8693) for an upstream credential rather than forwarding the
+# caller's token.
+#
+# Validate with: uv run mcp-portal validate --config examples/billing-http.yaml
+# Serve with:    uv run mcp-portal serve    --config examples/billing-http.yaml
+
+version: "1"
+mode: configured
+
+server:
+  name: billing-portal
+  transport: http
+  http:
+    host: 127.0.0.1
+    port: 8443
+    path: /mcp
+    # Only browser-originated clients need this (the SDK's DNS-rebinding
+    # defense checks Origin only when one is sent); a non-browser MCP client
+    # is unaffected either way.
+    allowed_origins: ["https://client.example.com"]
+
+upstreams:
+  billing:
+    base_url: https://api.example.com
+    timeout_ms: 30000
+    auth:
+      outbound:
+        mode: token_exchange
+        token_endpoint: https://idp.example.com/oauth2/token
+        client_id: sidekit-billing
+        # Secrets are references only. A literal here fails to load.
+        # Reuses BILLING_API_KEY so this example loads under the same test
+        # harness as billing.yaml; use a distinct secret in a real deployment.
+        client_secret: ${env:BILLING_API_KEY}
+        audience: https://api.example.com
+        requested_token_type: "urn:ietf:params:oauth:token-type:access_token"
+
+naming:
+  strategy: operation_id
+  prefix_with_group_tag: true
+
+operations:
+  - id: initiate_payment
+    upstream: billing
+    description: Initiate a payment.
+    group_tags: [billing]
+    binding:
+      method: POST
+      path: /v1/payments
+      body:
+        content_type: application/json
+        schema:
+          type: object
+          properties:
+            amount: { type: integer }
+          required: [amount]
+
+  - id: list_invoices
+    upstream: billing
+    description: List invoices for a customer.
+    group_tags: [billing]
+    binding:
+      method: GET
+      path: /v1/invoices
+      parameters:
+        - { arg: customer_id, in: query, wire_name: customerId, required: true,
+            schema: { type: string } }
+
+# RFC 9068 access-token validation for every inbound call. `audience` is this
+# server's own resource identifier — the URL a client reaches it through —
+# not the upstream's; it also names the RFC 9728 protected-resource metadata
+# this server publishes at /.well-known/oauth-protected-resource/mcp.
+auth:
+  inbound:
+    enabled: true
+    issuer: https://idp.example.com
+    audience: https://api.example.com/mcp
+
+# The RAR policy below requires `authorization_details` on `initiate_payment`
+# and marks it `outbound.carry: true`, so only that accumulated requirement —
+# never the caller's whole presented set — reaches the token_exchange call.
+policy:
+  file: ./policies/billing-http-policy.yaml

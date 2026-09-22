@@ -4,11 +4,12 @@ mcp-portal is an MCP gateway for HTTP/OpenAPI backends. Instead of giving an
 LLM raw system or API access, it exposes specific, opted-in backend endpoints
 as structured MCP tools.
 
-**Status: P4 (outbound).** OpenAPI introspection, opt-in exposure via
-`x-mcp-*` extensions, RAR (RFC 9396) policy enforcement, and outbound
-`client_credentials` auth are implemented, all served over stdio. Outbound
-`token_exchange`, inbound OAuth, the HTTP transport, and non-HTTP backends are
-not implemented — see [Roadmap](#roadmap) and the
+**Status: P4.** OpenAPI introspection, opt-in exposure via `x-mcp-*`
+extensions, RAR (RFC 9396) policy enforcement, outbound `client_credentials`
+and `token_exchange` auth, the streamable HTTP transport, and inbound OAuth
+(JWT validation, JWKS, RFC 9728 discovery) are implemented — servable over
+stdio or HTTP. Non-HTTP backends are not implemented — see
+[Roadmap](#roadmap) and the
 [design spec](docs/superpowers/specs/2026-09-19-mcp-sidekit-design.md).
 
 ## Key benefits
@@ -57,6 +58,17 @@ then forwards it to the upstream over HTTP.
   field is a `${env:VAR}` or `${file:path}` reference, never a literal; a
   denylist blocks bindings that would let a model supply `Authorization`,
   `Host`, `Cookie`, or `X-Forwarded-*` headers.
+- **HTTP transport for the gateway itself** — `transport: http` serves over
+  the `mcp` SDK's streamable HTTP transport, with the Origin/Host
+  DNS-rebinding defense and RFC 9728 protected-resource metadata built in.
+- **Inbound OAuth and outbound `client_credentials`/`token_exchange`** —
+  under `transport: http`, `auth.inbound` validates the caller's own bearer
+  JWT (RFC 9068, JWKS-backed) and evaluates RAR policy against its
+  `authorization_details` claim; an upstream configured with
+  `outbound.mode: token_exchange` then exchanges that same token (RFC 8693)
+  for its own credential, carrying only the policy's required detail — never
+  the caller's whole presented set — when a matching rule sets
+  `outbound.carry: true`.
 
 ## Quickstart
 
@@ -84,7 +96,9 @@ Register it with an AI client as a stdio MCP server, e.g. in
 ```
 
 See [`examples/billing.yaml`](examples/billing.yaml) for a full commented
-config, and [`schema/config-v1.schema.json`](schema/config-v1.schema.json)
+config, [`examples/billing-http.yaml`](examples/billing-http.yaml) for the
+streamable-HTTP counterpart (inbound OAuth + outbound `token_exchange`), and
+[`schema/config-v1.schema.json`](schema/config-v1.schema.json)
 (generated from the Pydantic models via `uv run python -m mcp_portal.config.schema`)
 for the schema JSON and YAML configs are validated against.
 
@@ -109,9 +123,6 @@ An operation with no `x-mcp-*` extensions is still exposed in
 
 Not implemented yet, tracked in the [design spec](docs/superpowers/specs/2026-09-19-mcp-sidekit-design.md):
 
-- HTTP transport for the gateway itself (stdio only today)
-- Inbound OAuth (JWT validation, JWKS, RFC 9728 discovery) and outbound
-  `token_exchange` auth mode
 - gRPC and GraphQL backends (HTTP/OpenAPI only today)
 - JSONPath-based response filtering (byte-size truncation only today)
 - Per-call rate limiting

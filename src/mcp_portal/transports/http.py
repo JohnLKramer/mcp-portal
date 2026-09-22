@@ -41,11 +41,16 @@ class CredentialSource(Protocol):
     said to carry (§8's `outbound.carry`) — empty when no rule asked for it.
     `subject_token` is the raw inbound bearer token, present only under
     `transport: http` with inbound auth enabled; every mode but
-    `token_exchange` ignores it.
+    `token_exchange` ignores it. `subject_token_expires_at` is that token's
+    expiry (epoch seconds), used only by `token_exchange` to cap the
+    exchanged token's TTL.
     """
 
     async def get(
-        self, carry: tuple[AuthorizationDetail, ...], subject_token: str | None = None
+        self,
+        carry: tuple[AuthorizationDetail, ...],
+        subject_token: str | None = None,
+        subject_token_expires_at: int | None = None,
     ) -> "Credential | None": ...  # noqa: UP037 - Credential is defined below this class
 
 
@@ -66,7 +71,10 @@ class StaticCredentialSource:
     credential: Credential | None
 
     async def get(
-        self, carry: tuple[AuthorizationDetail, ...], subject_token: str | None = None
+        self,
+        carry: tuple[AuthorizationDetail, ...],
+        subject_token: str | None = None,
+        subject_token_expires_at: int | None = None,
     ) -> Credential | None:
         return self.credential
 
@@ -273,13 +281,17 @@ class HttpTransport:
         operation: Operation,
         arguments: dict[str, Any],
         carry: tuple[AuthorizationDetail, ...] = (),
+        subject_token: str | None = None,
+        subject_token_expires_at: int | None = None,
     ) -> HttpResponse:
         binding = operation.binding
         assert isinstance(binding, HttpBinding)
         base_url = self._upstream.base_url
         # Callers must resolve base_url before constructing HttpTransport.
         assert base_url is not None
-        credential = await self._credential_source.get(carry)
+        credential = await self._credential_source.get(
+            carry, subject_token, subject_token_expires_at
+        )
         request = build_request(binding, base_url, arguments, credential)
 
         attempts = _MAX_ATTEMPTS if self._retryable(operation) else 1

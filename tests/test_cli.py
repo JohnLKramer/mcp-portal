@@ -81,3 +81,24 @@ def test_logging_setup_does_not_switch_on_httpx_request_logging(tmp_path: Path):
 def test_serve_requires_a_config(capsys):
     with pytest.raises(SystemExit):
         main(["serve"])
+
+
+def test_serve_dispatches_to_http_when_transport_is_http(tmp_path, monkeypatch):
+    """Not a full server-startup test (that needs a live port + uvicorn
+    event loop, covered by the integration suite) — asserts main() picks the
+    HTTP path rather than stdio by monkeypatching uvicorn's runner and
+    checking it was invoked with the built ASGI app."""
+    calls = []
+
+    async def fake_serve(app, host, port):
+        calls.append((app, host, port))
+
+    import mcp_portal.cli as cli_module
+
+    monkeypatch.setattr(cli_module, "_run_uvicorn", fake_serve)
+
+    config = CONFIG | {
+        "server": {"name": "s", "transport": "http", "http": {"host": "127.0.0.1", "port": 8000}}
+    }
+    main(["serve", "--config", str(write(tmp_path, config))])
+    assert len(calls) == 1

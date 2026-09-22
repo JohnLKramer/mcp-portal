@@ -7,6 +7,7 @@ client_credentials and token exchange behind the same return type.
 
 import json
 import logging
+import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 
@@ -128,7 +129,10 @@ class ClientCredentialsSource:
             ) from None
 
     async def get(
-        self, carry: tuple[AuthorizationDetail, ...], subject_token: str | None = None
+        self,
+        carry: tuple[AuthorizationDetail, ...],
+        subject_token: str | None = None,
+        subject_token_expires_at: int | None = None,
     ) -> Credential | None:
         scopes = tuple(sorted(self.outbound.scopes))
         key = f"client_credentials:{self.upstream_key}:{scopes}:{hash(carry)}"
@@ -175,7 +179,10 @@ class TokenExchangeSource:
     resource: str | None = None
 
     async def get(
-        self, carry: tuple[AuthorizationDetail, ...], subject_token: str | None = None
+        self,
+        carry: tuple[AuthorizationDetail, ...],
+        subject_token: str | None = None,
+        subject_token_expires_at: int | None = None,
     ) -> Credential | None:
         if subject_token is None:
             raise OutboundError(
@@ -203,9 +210,13 @@ class TokenExchangeSource:
             details_json = _authorization_details_json(carry)
             if details_json is not None:
                 data["authorization_details"] = details_json
-            return await _post_token_request(
+            token, ttl = await _post_token_request(
                 self.client, self.token_endpoint, self.client_id, self.client_secret, data
             )
+            if subject_token_expires_at is not None:
+                subject_ttl = max(0.0, subject_token_expires_at - time.time() - _EXPIRY_LEEWAY_S)
+                ttl = min(ttl, subject_ttl)
+            return token, ttl
 
         token = await self.cache.get_or_fetch(key, fetch)
         return Credential(header="Authorization", value=f"Bearer {token}")
