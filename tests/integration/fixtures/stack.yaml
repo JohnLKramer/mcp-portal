@@ -12,6 +12,12 @@ upstreams:
   orders:
     base_url: http://localhost:8082
     timeout_ms: 5000
+    auth:
+      outbound:
+        mode: static
+        header: X-Api-Key
+        scheme: null
+        value: ${env:ORDERS_MOCK_API_KEY}
 
 naming:
   strategy: operation_id

@@ -23,6 +23,11 @@ STACK_CONFIG = Path(__file__).resolve().parent / "fixtures" / "stack.yaml"
 MOCK_HEALTH_URLS = ("http://localhost:8081/healthz", "http://localhost:8082/healthz")
 
 
+@pytest.fixture(autouse=True)
+def _orders_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ORDERS_MOCK_API_KEY", "orders-mock-test-key")
+
+
 def _wait_for_health(timeout: float = 30.0) -> None:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:

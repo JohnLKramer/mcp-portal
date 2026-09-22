@@ -3,10 +3,40 @@ import pytest
 from orders_mock.app import app
 
 
+_NO_AUTH = object()
+
+
+class AuthenticatedTestClient:
+    def __init__(self, app_test_client, api_key=None):
+        self._client = app_test_client
+        self._api_key = api_key
+
+    def _add_auth(self, headers):
+        if headers is _NO_AUTH:
+            return None
+        if headers is None:
+            headers = {}
+        else:
+            headers = dict(headers)
+        if self._api_key is not None and "X-Api-Key" not in headers:
+            headers["X-Api-Key"] = self._api_key
+        return headers or None
+
+    def get(self, path, headers=None, **kwargs):
+        if headers is _NO_AUTH:
+            return self._client.get(path, **kwargs)
+        return self._client.get(path, headers=self._add_auth(headers), **kwargs)
+
+    def post(self, path, headers=None, **kwargs):
+        if headers is _NO_AUTH:
+            return self._client.post(path, **kwargs)
+        return self._client.post(path, headers=self._add_auth(headers), **kwargs)
+
+
 @pytest.fixture
 def client():
     app.config.update(TESTING=True)
-    return app.test_client()
+    return AuthenticatedTestClient(app.test_client(), api_key="orders-mock-test-key")
 
 
 def test_healthz_returns_ok(client):
@@ -48,3 +78,23 @@ def test_create_order_adds_and_returns_order(client):
 
     listed = client.get("/v1/orders")
     assert len(listed.get_json()["orders"]) == 2
+
+
+def test_list_orders_without_an_api_key_is_401(client):
+    response = client.get("/v1/orders", headers=_NO_AUTH)
+    assert response.status_code == 401
+
+
+def test_list_orders_with_the_wrong_api_key_is_401(client):
+    response = client.get("/v1/orders", headers={"X-Api-Key": "wrong"})
+    assert response.status_code == 401
+
+
+def test_list_orders_with_the_right_api_key_succeeds(client):
+    response = client.get("/v1/orders", headers={"X-Api-Key": "orders-mock-test-key"})
+    assert response.status_code == 200
+
+
+def test_healthz_needs_no_api_key(client):
+    response = client.get("/healthz", headers=_NO_AUTH)
+    assert response.status_code == 200
