@@ -7,7 +7,6 @@ import httpx
 import pytest
 
 from mcp_portal.app import build_app
-from mcp_portal.auth.principal import Principal
 from mcp_portal.config.loader import ConfigError, load_config
 
 FIXTURES = Path(__file__).parent / "fixtures" / "openapi"
@@ -273,18 +272,32 @@ async def test_build_app_logs_a_banner_for_introspect_unsafe(tmp_path: Path, cap
         await app.aclose()
 
 
-def test_build_app_with_no_policy_file_allows_every_call(
+@pytest.mark.anyio
+async def test_build_app_with_no_policy_file_allows_every_call(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     # Reuses this file's existing `_write_config`/`CONFIG`-style helper
-    # with no `policy` key — behavior must be identical to P1/P2.
+    # with no `policy` key — behavior must be identical to P1/P2. Exercised
+    # through the real `ToolInvoker.call()` path, not by touching internals.
     monkeypatch.setenv("BILLING_KEY", "sk-test")
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"invoices": []})
+
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr(
+        httpx,
+        "AsyncClient",
+        lambda **kw: real_client(transport=httpx.MockTransport(handler), **kw),
+    )
+
     loaded = load_config(_write_config(tmp_path, CONFIG))
     app = build_app(loaded)
-    assert app.invoker._policy is not None
-    assert app.invoker._policy.evaluate(
-        app.invoker._toolset.operations[0], Principal("local", ())
-    ).allowed
+    try:
+        result = await app.invoker.call("billing_list_invoices", {"customer_id": "cus_1"})
+    finally:
+        await app.aclose()
+    assert result.is_error is False
 
 
 def test_build_app_wires_the_configured_local_principal(
@@ -303,9 +316,14 @@ def test_build_app_wires_the_configured_local_principal(
     assert app.invoker._principal.authorization_details[0].type == "payment_initiation"
 
 
-def test_build_app_wires_a_policy_file_and_enforces_it(
+@pytest.mark.anyio
+async def test_build_app_wires_a_policy_file_and_enforces_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
+    # A denied call must never reach the transport — this test does not mock
+    # httpx.AsyncClient at all, so if enforcement failed to deny the call and
+    # a real request were attempted, it would fail loudly rather than pass
+    # by accident.
     monkeypatch.setenv("BILLING_KEY", "sk-test")
     (tmp_path / "rar-policy.yaml").write_text(
         "version: '1'\n"
@@ -317,8 +335,12 @@ def test_build_app_wires_a_policy_file_and_enforces_it(
     payload = CONFIG | {"policy": {"file": "./rar-policy.yaml"}}
     loaded = load_config(_write_config(tmp_path, payload))
     app = build_app(loaded)
-    operation = app.invoker._toolset.operations[0]
-    assert app.invoker._policy.evaluate(operation, Principal("local", ())).allowed is False
+    try:
+        result = await app.invoker.call("billing_list_invoices", {"customer_id": "cus_1"})
+    finally:
+        await app.aclose()
+    assert result.is_error is True
+    assert "payment_initiation" in result.content[0].text
 
 
 def test_build_app_logs_a_dead_policy_rule_warning(
