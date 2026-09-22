@@ -102,10 +102,57 @@ uv run pytest -m integration   # integration tests, requires Docker
 One test file per source module under `tests/` (e.g. `test_registry.py` for
 `registry.py`). `tests/test_p3_end_to_end.py` exercises the full RAR
 enforcement path against the design's billing example. Golden fixtures for
-OpenAPI parsing live under `tests/fixtures/`.
+OpenAPI parsing live under `tests/fixtures/`; integration test Docker fixtures
+live in `tests/integration/fixtures/` (`stack.yaml`, `stack-introspection.yaml`,
+`stack-policy-denied.yaml`, `stack-policy-authorized.yaml`, `stack-oauth.yaml`).
 
 > TODO: no CI workflow currently runs these commands (see Build & Development
 > Commands above) — verify before assuming PRs are gated on tests/lint/types.
+
+## Technology Choices
+
+| Concern | Choice |
+|---|---|
+| OpenAPI parsing | hand-rolled (`sources/openapi*.py`) + `jsonschema` |
+| RAR (RFC 9396) | hand-rolled (`auth/rar.py`, `policy.py`) — small predicate, no library |
+| Streaming HTTP transport | `mcp` SDK (`StreamableHTTPSessionManager`, P4b) |
+| stdio transport | `mcp` SDK (`stdio_server`, P1) |
+| JWT | `pyjwt[crypto]` (P4b) |
+| Mock HTTP backends | Flask + `gunicorn` |
+| Mock OAuth IdP | `navikt/mock-oauth2-server` |
+| gRPC | not yet decided — undesigned, see `future-work.md` / design spec §13 |
+| GraphQL | not yet decided — designed at a high level (design spec §15), P6, no library chosen |
+| DASH / HLS / QUIC | not yet decided — undesigned, see design spec §13 |
+| Web crawling / resource allow-deny-listing | not yet decided — undesigned, see `future-work.md` |
+
+Undesigned items are listed deliberately, not omitted — this is a single
+place to see what's decided and what's still open.
+
+## Docker/Mocks Testing Standard
+
+- `mocks/<source>/` is one Flask app per distinct real-world API being
+  simulated, its own `pyproject.toml`/`uv.lock`/Dockerfile, always exposing
+  `/healthz`. Each mock implements just enough behavior — a protected
+  route, a served OpenAPI document — to exercise the phase(s) that need it.
+  Comprehensive per-endpoint coverage stays a unit-test concern
+  (`mocks/<source>/tests/`).
+- A mock whose upstream is meant to require a credential actually enforces
+  it — a passing integration test must prove the backend rejected an
+  unauthenticated call, not merely that mcp-portal attached one. It's fine
+  for a mock's own auth-serving concern to live in the same process as its
+  functional routes; a separate identity-provider process is only worth it
+  when the protocol itself needs a real implementation (OAuth).
+- `docker buildx bake` builds every image (`Dockerfile.base` + `docker-bake.hcl`
+  supply the shared Python/`uv`/non-root-user layers via Buildx's
+  additional-build-context mechanism); `docker compose up` only runs
+  already-built images — Compose cannot resolve a Dockerfile's `FROM
+  pybuilder`/`FROM pyruntime` bake-context references on its own.
+- `tests/integration/` stays `pytest.mark.integration`-gated, skipped (not
+  failed) without Docker. New scenarios get their own fixture file
+  alongside `fixtures/stack.yaml` rather than overloading one config to
+  prove everything.
+- Every phase from here forward ships its Docker proof in the same PR as
+  the feature.
 
 ## Agent Guardrails
 
