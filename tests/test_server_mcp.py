@@ -4,6 +4,7 @@ import httpx
 import pytest
 from mcp import types
 
+from mcp_portal.auth.outbound import OutboundError
 from mcp_portal.auth.principal import Principal
 from mcp_portal.auth.rar import AuthorizationDetail
 from mcp_portal.config.models import UpstreamConfig
@@ -19,7 +20,7 @@ from mcp_portal.operations import (
 from mcp_portal.policy import PolicyEngine
 from mcp_portal.registry import ToolSet
 from mcp_portal.server.mcp import ToolInvoker, annotations_for, to_mcp_tool
-from mcp_portal.transports.http import HttpTransport
+from mcp_portal.transports.http import HttpTransport, StaticCredentialSource
 
 
 def op(effect: Effect = Effect.READ_ONLY, name: str = "list_invoices") -> Operation:
@@ -76,7 +77,7 @@ def invoker(handler, operation: Operation) -> ToolInvoker:
     toolset = ToolSet(operations=(operation,), by_name={operation.name: operation})
     return ToolInvoker(
         toolset=toolset,
-        transports={"billing": HttpTransport(client, upstream, None)},
+        transports={"billing": HttpTransport(client, upstream, StaticCredentialSource(None))},
         policy=PolicyEngine(PolicyConfig(version="1")),
     )
 
@@ -210,7 +211,7 @@ def invoker_with_policy(
     toolset = ToolSet(operations=(operation,), by_name={operation.name: operation})
     return ToolInvoker(
         toolset=toolset,
-        transports={"billing": HttpTransport(client, upstream, None)},
+        transports={"billing": HttpTransport(client, upstream, StaticCredentialSource(None))},
         policy=policy,
         principal=principal,
     )
@@ -278,6 +279,47 @@ async def test_an_allowed_call_proceeds_to_the_transport():
 
 
 @pytest.mark.anyio
+async def test_a_carrying_rules_required_details_reach_the_credential_source():
+    seen_carry = []
+
+    class RecordingSource:
+        async def get(self, carry, subject_token=None):
+            seen_carry.append(carry)
+            return None
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={})
+
+    cfg = PolicyConfig.model_validate(
+        {
+            "version": "1",
+            "rules": [
+                {
+                    "match": {"tags": ["billing"]},
+                    "require": {"authorization_details": [{"type": "payment_initiation"}]},
+                    "outbound": {"carry": True},
+                }
+            ],
+        }
+    )
+    presented = AuthorizationDetail(type="payment_initiation")
+    toolset = ToolSet(operations=(op(),), by_name={op().name: op()})
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    invoker = ToolInvoker(
+        toolset=toolset,
+        transports={
+            "billing": HttpTransport(
+                client, UpstreamConfig(base_url="https://api.example.com"), RecordingSource()
+            )
+        },
+        policy=PolicyEngine(cfg),
+        principal=Principal("local", (presented,)),
+    )
+    await invoker.call("list_invoices", {})
+    assert seen_carry == [(presented,)]
+
+
+@pytest.mark.anyio
 async def test_invalid_arguments_are_rejected_before_policy_is_even_consulted():
     async def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={})
@@ -296,3 +338,33 @@ async def test_invalid_arguments_are_rejected_before_policy_is_even_consulted():
 
     assert result.is_error is True
     assert "invalid arguments" in result.content[0].text
+
+
+@pytest.mark.anyio
+async def test_outbound_error_from_the_credential_source_is_an_error_result_not_an_exception():
+    class RaisingSource:
+        async def get(self, carry, subject_token=None):
+            raise OutboundError("token request to 'https://idp.example.com/token' failed with 401")
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={})
+
+    operation = op()
+    toolset = ToolSet(operations=(operation,), by_name={operation.name: operation})
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    invoker = ToolInvoker(
+        toolset=toolset,
+        transports={
+            "billing": HttpTransport(
+                client, UpstreamConfig(base_url="https://api.example.com"), RaisingSource()
+            )
+        },
+        policy=PolicyEngine(PolicyConfig(version="1")),
+    )
+
+    # No pytest.raises here: the whole point is that OutboundError never
+    # escapes `call` — it completes normally and returns an error result.
+    result = await invoker.call("list_invoices", {})
+
+    assert result.is_error is True
+    assert "billing" in result.content[0].text

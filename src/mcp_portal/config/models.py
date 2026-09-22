@@ -61,15 +61,36 @@ class IntrospectionConfig(Base):
 
 
 class OutboundConfig(Base):
-    mode: Literal["none", "static"] = "none"
+    mode: Literal["none", "static", "client_credentials"] = "none"
     header: str = "Authorization"
     scheme: str | None = "Bearer"
     value: SecretRef | None = None
+    token_endpoint: BaseUrl | None = None
+    client_id: str | None = None
+    client_secret: SecretRef | None = None
+    scopes: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _static_needs_a_value(self) -> Self:
         if self.mode == "static" and self.value is None:
             raise ValueError("outbound mode 'static' requires 'value'")
+        return self
+
+    @model_validator(mode="after")
+    def _client_credentials_needs_endpoint_and_client(self) -> Self:
+        if self.mode != "client_credentials":
+            return self
+        missing = [
+            name
+            for name, value in (
+                ("token_endpoint", self.token_endpoint),
+                ("client_id", self.client_id),
+                ("client_secret", self.client_secret),
+            )
+            if value is None
+        ]
+        if missing:
+            raise ValueError(f"outbound mode 'client_credentials' requires {missing}")
         return self
 
 

@@ -7,7 +7,7 @@ import pytest
 
 from mcp_portal.config.models import UpstreamConfig
 from mcp_portal.operations import Effect, HttpBinding, Operation, Sensitivity
-from mcp_portal.transports.http import Credential, HttpTransport
+from mcp_portal.transports.http import Credential, HttpTransport, StaticCredentialSource
 
 
 def op(effect: Effect = Effect.READ_ONLY, method: str = "GET") -> Operation:
@@ -28,7 +28,9 @@ def op(effect: Effect = Effect.READ_ONLY, method: str = "GET") -> Operation:
 def transport(handler, credential: Credential | None = None, **upstream_kw) -> HttpTransport:
     upstream = UpstreamConfig(base_url="https://api.example.com", **upstream_kw)
     client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
-    return HttpTransport(client=client, upstream=upstream, credential=credential)
+    return HttpTransport(
+        client=client, upstream=upstream, credential_source=StaticCredentialSource(credential)
+    )
 
 
 @pytest.mark.anyio

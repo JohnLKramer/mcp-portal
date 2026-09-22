@@ -5,6 +5,7 @@ failure names the field to fix, an upstream 4xx surfaces the upstream's own
 message, and neither is retried by the client on its own initiative.
 """
 
+import logging
 from collections.abc import Mapping
 from typing import Any
 
@@ -12,11 +13,14 @@ import httpx
 import jsonschema
 from mcp import types
 
+from mcp_portal.auth.outbound import OutboundError
 from mcp_portal.auth.principal import Principal
 from mcp_portal.operations import Effect, Operation
 from mcp_portal.policy import PolicyEngine
 from mcp_portal.registry import ToolSet
 from mcp_portal.transports.http import HttpTransport, RequestBuildError
+
+log = logging.getLogger("mcp_portal")
 
 _ANNOTATIONS: dict[Effect, tuple[bool, bool, bool]] = {
     # effect: (read_only, destructive, idempotent)
@@ -95,7 +99,7 @@ class ToolInvoker:
             return _error(f"no transport configured for upstream {operation.upstream!r}")
 
         try:
-            response = await transport.execute(operation, args)
+            response = await transport.execute(operation, args, carry=decision.carry)
         except RequestBuildError as exc:
             return _error(f"invalid arguments for {name!r}: {exc}")
         except httpx.TimeoutException:
@@ -105,6 +109,18 @@ class ToolInvoker:
             # errors, protocol errors, redirect loops. None of them should reach
             # the client as a traceback instead of a tool result.
             return _error(f"upstream {operation.upstream!r} request failed: {exc}")
+        except OutboundError as exc:
+            # The credential source's own message is already scrubbed of IdP
+            # response content (see outbound.py), but we still keep it out of
+            # the client-facing text and only surface it in the log.
+            log.warning(
+                "outbound credential acquisition failed for upstream %r: %s",
+                operation.upstream,
+                exc,
+            )
+            return _error(
+                f"outbound credential acquisition failed for upstream {operation.upstream!r}"
+            )
 
         return types.CallToolResult(
             content=[types.TextContent(type="text", text=response.text)],

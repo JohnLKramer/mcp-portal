@@ -4,11 +4,12 @@ mcp-portal is an MCP gateway for HTTP/OpenAPI backends. Instead of giving an
 LLM raw system or API access, it exposes specific, opted-in backend endpoints
 as structured MCP tools.
 
-**Status: P3.** OpenAPI introspection, opt-in exposure via `x-mcp-*`
-extensions, and RAR (RFC 9396) policy enforcement are implemented, all served
-over stdio with a static outbound credential. OAuth (inbound and outbound),
-the HTTP transport, and non-HTTP backends are not implemented — see
-[Roadmap](#roadmap) and the [design spec](docs/superpowers/specs/2026-09-19-mcp-sidekit-design.md).
+**Status: P4 (outbound).** OpenAPI introspection, opt-in exposure via
+`x-mcp-*` extensions, RAR (RFC 9396) policy enforcement, and outbound
+`client_credentials` auth are implemented, all served over stdio. Outbound
+`token_exchange`, inbound OAuth, the HTTP transport, and non-HTTP backends are
+not implemented — see [Roadmap](#roadmap) and the
+[design spec](docs/superpowers/specs/2026-09-19-mcp-sidekit-design.md).
 
 ## Key benefits
 
@@ -110,7 +111,7 @@ Not implemented yet, tracked in the [design spec](docs/superpowers/specs/2026-09
 
 - HTTP transport for the gateway itself (stdio only today)
 - Inbound OAuth (JWT validation, JWKS, RFC 9728 discovery) and outbound
-  `client_credentials` / `token_exchange` auth modes
+  `token_exchange` auth mode
 - gRPC and GraphQL backends (HTTP/OpenAPI only today)
 - JSONPath-based response filtering (byte-size truncation only today)
 - Per-call rate limiting
