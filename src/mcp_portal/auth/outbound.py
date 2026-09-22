@@ -138,3 +138,60 @@ class ClientCredentialsSource:
 
         token = await self.cache.get_or_fetch(key, fetch)
         return Credential(header="Authorization", value=f"Bearer {token}")
+
+
+@dataclass(frozen=True, slots=True)
+class TokenExchangeSource:
+    """RFC 8693 token exchange, using the inbound bearer token as the
+    `subject_token`. Cached per upstream + hash(subject token) + scopes +
+    carry — the subject token itself is part of the key (not its `sub`
+    claim), since two distinct tokens for the same subject must never share
+    an exchanged token: a revoked or expired one would keep working through
+    an entry minted for the other (§8)."""
+
+    token_endpoint: str
+    client_id: str
+    client_secret: str
+    requested_token_type: str
+    scopes: list[str]
+    client: httpx.AsyncClient
+    cache: TokenCache
+    upstream_key: str
+    audience: str | None = None
+    resource: str | None = None
+
+    async def get(
+        self, carry: tuple[AuthorizationDetail, ...], subject_token: str | None = None
+    ) -> Credential | None:
+        if subject_token is None:
+            raise OutboundError(
+                "token_exchange requires an inbound 'subject_token'; this should have "
+                "been rejected at startup for a transport/auth combination with no "
+                "inbound token to exchange"
+            )
+
+        scopes = tuple(sorted(self.scopes))
+        key = f"token_exchange:{self.upstream_key}:{hash(subject_token)}:{scopes}:{hash(carry)}"
+
+        async def fetch() -> tuple[str, float]:
+            data: dict[str, str] = {
+                "grant_type": "urn:ietf:params:oauth:grant-type:token-exchange",
+                "subject_token": subject_token,
+                "subject_token_type": "urn:ietf:params:oauth:token-type:access_token",
+                "requested_token_type": self.requested_token_type,
+            }
+            if self.audience is not None:
+                data["audience"] = self.audience
+            if self.resource is not None:
+                data["resource"] = self.resource
+            if scopes:
+                data["scope"] = " ".join(scopes)
+            details_json = _authorization_details_json(carry)
+            if details_json is not None:
+                data["authorization_details"] = details_json
+            return await _post_token_request(
+                self.client, self.token_endpoint, self.client_id, self.client_secret, data
+            )
+
+        token = await self.cache.get_or_fetch(key, fetch)
+        return Credential(header="Authorization", value=f"Bearer {token}")
