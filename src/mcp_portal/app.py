@@ -26,7 +26,7 @@ from mcp_portal.sources.merge import merge_operations
 from mcp_portal.sources.openapi import OpenApiSource, load_document
 from mcp_portal.sources.openapi_document import OpenApiError
 from mcp_portal.sources.refs import RefError
-from mcp_portal.transports.http import HttpTransport
+from mcp_portal.transports.http import HttpTransport, StaticCredentialSource
 
 log = logging.getLogger("mcp_portal")
 
@@ -143,7 +143,9 @@ def build_app(loaded: LoadedConfig) -> App:
         transports[key] = HttpTransport(
             client=client,
             upstream=upstream.model_copy(update={"base_url": resolved_base_urls[key]}),
-            credential=credential_for(upstream.auth.outbound, loaded.secrets),
+            credential_source=StaticCredentialSource(
+                credential_for(upstream.auth.outbound, loaded.secrets)
+            ),
         )
 
     log.info("serving %d tool(s) from %d upstream(s)", len(toolset.operations), len(transports))

@@ -19,7 +19,7 @@ from mcp_portal.operations import (
 from mcp_portal.policy import PolicyEngine
 from mcp_portal.registry import ToolSet
 from mcp_portal.server.mcp import ToolInvoker, annotations_for, to_mcp_tool
-from mcp_portal.transports.http import HttpTransport
+from mcp_portal.transports.http import HttpTransport, StaticCredentialSource
 
 
 def op(effect: Effect = Effect.READ_ONLY, name: str = "list_invoices") -> Operation:
@@ -76,7 +76,7 @@ def invoker(handler, operation: Operation) -> ToolInvoker:
     toolset = ToolSet(operations=(operation,), by_name={operation.name: operation})
     return ToolInvoker(
         toolset=toolset,
-        transports={"billing": HttpTransport(client, upstream, None)},
+        transports={"billing": HttpTransport(client, upstream, StaticCredentialSource(None))},
         policy=PolicyEngine(PolicyConfig(version="1")),
     )
 
@@ -210,7 +210,7 @@ def invoker_with_policy(
     toolset = ToolSet(operations=(operation,), by_name={operation.name: operation})
     return ToolInvoker(
         toolset=toolset,
-        transports={"billing": HttpTransport(client, upstream, None)},
+        transports={"billing": HttpTransport(client, upstream, StaticCredentialSource(None))},
         policy=policy,
         principal=principal,
     )

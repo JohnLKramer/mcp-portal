@@ -10,11 +10,12 @@ import random
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol
 from urllib.parse import quote, urlencode
 
 import httpx
 
+from mcp_portal.auth.rar import AuthorizationDetail
 from mcp_portal.config.models import UpstreamConfig
 from mcp_portal.operations import BodyMode, Effect, HttpBinding, Operation, ParamLocation
 
@@ -33,10 +34,41 @@ class RequestBuildError(Exception):
     """Raised when validated arguments still cannot form a safe request."""
 
 
+class CredentialSource(Protocol):
+    """Produces the credential to attach to one call.
+
+    `carry` is the accumulated set of RAR details the matching policy rules
+    said to carry (§8's `outbound.carry`) — empty when no rule asked for it.
+    `subject_token` is the raw inbound bearer token, present only under
+    `transport: http` with inbound auth enabled; every mode but
+    `token_exchange` ignores it.
+    """
+
+    async def get(
+        self, carry: tuple[AuthorizationDetail, ...], subject_token: str | None = None
+    ) -> "Credential | None": ...  # noqa: UP037 - Credential is defined below this class
+
+
 @dataclass(frozen=True, slots=True)
 class Credential:
     header: str
     value: str
+
+
+@dataclass(frozen=True, slots=True)
+class StaticCredentialSource:
+    """Wraps a `none`/`static` credential resolved once at startup.
+
+    Neither mode varies per call, so `carry` and `subject_token` are accepted
+    (to satisfy `CredentialSource`) and ignored.
+    """
+
+    credential: Credential | None
+
+    async def get(
+        self, carry: tuple[AuthorizationDetail, ...], subject_token: str | None = None
+    ) -> Credential | None:
+        return self.credential
 
 
 @dataclass(frozen=True, slots=True)
@@ -177,11 +209,11 @@ class HttpTransport:
         self,
         client: httpx.AsyncClient,
         upstream: UpstreamConfig,
-        credential: Credential | None,
+        credential_source: CredentialSource,
     ) -> None:
         self._client = client
         self._upstream = upstream
-        self._credential = credential
+        self._credential_source = credential_source
 
     def _retryable(self, operation: Operation) -> bool:
         # Retrying a POST after a timeout is how a customer gets charged twice.
@@ -236,13 +268,19 @@ class HttpTransport:
         marker = f"\n\n[truncated: {len(raw)} bytes total, {cap} shown]"
         return HttpResponse(response.status_code, body + marker, True, len(raw))
 
-    async def execute(self, operation: Operation, arguments: dict[str, Any]) -> HttpResponse:
+    async def execute(
+        self,
+        operation: Operation,
+        arguments: dict[str, Any],
+        carry: tuple[AuthorizationDetail, ...] = (),
+    ) -> HttpResponse:
         binding = operation.binding
         assert isinstance(binding, HttpBinding)
         base_url = self._upstream.base_url
         # Callers must resolve base_url before constructing HttpTransport.
         assert base_url is not None
-        request = build_request(binding, base_url, arguments, self._credential)
+        credential = await self._credential_source.get(carry)
+        request = build_request(binding, base_url, arguments, credential)
 
         attempts = _MAX_ATTEMPTS if self._retryable(operation) else 1
         last: httpx.Response | None = None
