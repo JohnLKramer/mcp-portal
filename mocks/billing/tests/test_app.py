@@ -145,6 +145,24 @@ def test_list_invoices_with_a_valid_bearer_token_succeeds(client, monkeypatch, r
     assert response.status_code == 200
 
 
+def test_list_invoices_with_unknown_kid_returns_401(client, monkeypatch, rsa_key):
+    from billing_mock import app as app_module
+
+    class _FakeJwksClient:
+        def get_signing_key_from_jwt(self, token):
+            raise jwt.PyJWKClientError("Unable to find a signing key that matches")
+
+    monkeypatch.setattr(app_module, "_jwks_client", _FakeJwksClient())
+
+    token = _bearer(rsa_key)
+    response = client.get(
+        "/v1/invoices",
+        query_string={"customerId": "cust_1"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 401
+
+
 def test_openapi_document_needs_no_bearer_token(client):
     response = client.get("/openapi.json")
     assert response.status_code == 200

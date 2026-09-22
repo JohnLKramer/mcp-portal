@@ -28,7 +28,7 @@ def _require_bearer_token():
             audience="billing-mock",
             issuer=_OAUTH_ISSUER,
         )
-    except jwt.InvalidTokenError:
+    except (jwt.InvalidTokenError, jwt.PyJWKClientError):
         return jsonify(error="invalid bearer token"), 401
     return None
 
