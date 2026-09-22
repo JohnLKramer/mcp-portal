@@ -41,7 +41,12 @@ def mock_stack() -> Iterator[None]:
         pytest.skip("docker is not available")
 
     subprocess.run(
-        ["docker", "compose", "up", "-d", "--build", "billing-mock", "orders-mock"],
+        ["docker", "buildx", "bake", "billing-mock", "orders-mock"],
+        cwd=REPO_ROOT,
+        check=True,
+    )
+    subprocess.run(
+        ["docker", "compose", "up", "-d", "billing-mock", "orders-mock"],
         cwd=REPO_ROOT,
         check=True,
     )
