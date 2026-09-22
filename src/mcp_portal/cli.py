@@ -11,8 +11,18 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
+from starlette.applications import Starlette
+
 from mcp_portal.app import build_app
 from mcp_portal.config.loader import ConfigError, load_config
+
+
+async def _run_uvicorn(asgi_app: Starlette, host: str, port: int) -> None:
+    import uvicorn
+
+    config = uvicorn.Config(asgi_app, host=host, port=port, log_level="info")
+    server = uvicorn.Server(config)
+    await server.serve()
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -68,13 +78,28 @@ def main(argv: Sequence[str] | None = None) -> int:
         asyncio.run(app.aclose())
         return 0
 
-    from mcp_portal.server.stdio import run_stdio
+    if loaded.config.server.transport == "stdio":
+        from mcp_portal.server.stdio import run_stdio
 
-    async def _serve() -> None:
+        async def _serve() -> None:
+            try:
+                await run_stdio(app, loaded.config.server.name)
+            finally:
+                await app.aclose()
+
+        asyncio.run(_serve())
+        return 0
+
+    from mcp_portal.server.http import build_http_app
+
+    async def _serve_http() -> None:
         try:
-            await run_stdio(app, loaded.config.server.name)
+            asgi_app = build_http_app(app, loaded.config, loaded.secrets)
+            await _run_uvicorn(
+                asgi_app, loaded.config.server.http.host, loaded.config.server.http.port
+            )
         finally:
             await app.aclose()
 
-    asyncio.run(_serve())
+    asyncio.run(_serve_http())
     return 0
