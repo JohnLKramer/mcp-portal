@@ -5,6 +5,7 @@ from mcp_portal.config.models import (
     ServerConfig,
     UpstreamConfig,
 )
+from mcp_portal.config.policy import PolicyConfig
 from mcp_portal.configure.interaction import ScriptedPrompter
 from mcp_portal.configure.reconcile import decisions_from_config, diff_operation_ids, run_reconcile
 from mcp_portal.operations import Effect, HttpBinding, Operation, Sensitivity
@@ -135,3 +136,84 @@ def test_run_reconcile_only_surveys_new_and_changed_operations():
     assert by_id["get_invoice"].exposed is True
     assert report.unchanged == ("list_invoices",)
     assert report.new == ("get_invoice",)
+
+
+def test_decisions_from_config_preserves_parameters_and_body_for_unchanged_detection():
+    entry = OperationEntry(
+        id="create_invoice",
+        upstream="billing",
+        description="d",
+        effect=Effect.ACTION,
+        sensitivity=Sensitivity.NORMAL,
+        binding=BindingEntry(
+            method="POST",
+            path="/invoices",
+            body={"schema": {"type": "object", "properties": {"amount": {"type": "integer"}}}},
+        ),
+    )
+    previous = decisions_from_config(_config_with(entry), None)
+
+    from mcp_portal.operations import BodySpec, HttpBinding
+
+    current = Operation(
+        id="create_invoice",
+        upstream="billing",
+        name="create_invoice",
+        title="create_invoice",
+        description="create_invoice",
+        group_tags=(),
+        effect=Effect.ACTION,
+        sensitivity=Sensitivity.NORMAL,
+        input_schema={},
+        binding=HttpBinding(
+            method="POST",
+            path="/invoices",
+            body=BodySpec(
+                content_type="application/json",
+                schema={"type": "object", "properties": {"amount": {"type": "integer"}}},
+            ),
+        ),
+    )
+
+    report = diff_operation_ids(previous, [current])
+    assert report.unchanged == ("create_invoice",)
+    assert report.changed == ()
+
+
+def test_decisions_from_config_reconstructs_require_from_a_tag_matched_policy_rule():
+    from mcp_portal.config.policy import (
+        AuthorizationDetailRequirement,
+        PolicyMatchSpec,
+        PolicyRule,
+        RequireConfig,
+    )
+
+    entry = OperationEntry(
+        id="create_invoice",
+        upstream="billing",
+        description="d",
+        effect=Effect.ACTION,
+        sensitivity=Sensitivity.NORMAL,
+        group_tags=["billing"],
+        binding=BindingEntry(method="POST", path="/invoices"),
+    )
+    policy = PolicyConfig(
+        version="1",
+        rules=[
+            PolicyRule(
+                match=PolicyMatchSpec(tags=["billing"]),
+                require=RequireConfig(
+                    authorization_details=[
+                        AuthorizationDetailRequirement(
+                            type="payment_initiation", actions=["initiate"]
+                        )
+                    ]
+                ),
+            )
+        ],
+    )
+    decisions = decisions_from_config(_config_with(entry), policy)
+
+    assert decisions["create_invoice"].require is not None
+    assert decisions["create_invoice"].require.type == "payment_initiation"
+    assert decisions["create_invoice"].require.actions == ("initiate",)

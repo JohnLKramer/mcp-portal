@@ -14,17 +14,22 @@ from mcp_portal.config.policy import PolicyConfig
 from mcp_portal.configure.decisions import OperationDecision, RequiredDetail, SurveyResult
 from mcp_portal.configure.interaction import Prompter
 from mcp_portal.configure.survey import run_survey
-from mcp_portal.operations import Effect, HttpBinding, Operation, Sensitivity
+from mcp_portal.operations import BodySpec, Effect, HttpBinding, Operation, Parameter, Sensitivity
 
 
-def _require_for(op_id: str, policy: PolicyConfig | None) -> RequiredDetail | None:
+def _require_for(
+    op_id: str, operation: Operation, policy: PolicyConfig | None
+) -> RequiredDetail | None:
     if policy is None:
         return None
-    for rule in policy.rules:
-        if op_id in rule.match.ids and rule.require is not None:
-            first = rule.require.authorization_details[0]
-            return RequiredDetail(type=first.type, actions=tuple(first.actions or ()))
-    return None
+    from mcp_portal.policy import _accumulated_details, _matching_rules
+
+    matching = _matching_rules(operation, policy.rules)
+    accumulated = _accumulated_details(matching)
+    if not accumulated:
+        return None
+    first = accumulated[0]
+    return RequiredDetail(type=first.type, actions=first.actions)
 
 
 def decisions_from_config(
@@ -37,6 +42,27 @@ def decisions_from_config(
     decisions: dict[str, OperationDecision] = {}
     for entry in config.operations:
         binding = entry.binding
+        parameters = tuple(
+            Parameter(
+                arg=p.arg,
+                location=p.location,
+                wire_name=p.wire_name or p.arg,
+                required=p.required,
+                schema=p.schema_,
+                style=p.style,
+                explode=p.explode,
+            )
+            for p in binding.parameters
+        )
+        body = (
+            BodySpec(
+                content_type=binding.body.content_type,
+                schema=binding.body.schema_,
+                mode=binding.body.mode,
+            )
+            if binding.body is not None
+            else None
+        )
         operation = Operation(
             id=entry.id,
             upstream=entry.upstream,
@@ -47,14 +73,16 @@ def decisions_from_config(
             effect=entry.effect or _fallback_effect(binding.method),
             sensitivity=entry.sensitivity or Sensitivity.NORMAL,
             input_schema={},
-            binding=HttpBinding(method=binding.method, path=binding.path),
+            binding=HttpBinding(
+                method=binding.method, path=binding.path, parameters=parameters, body=body
+            ),
         )
         decisions[entry.id] = OperationDecision(
             operation=operation,
             exposed=True,
             effect=operation.effect,
             sensitivity=operation.sensitivity,
-            require=_require_for(entry.id, policy),
+            require=_require_for(entry.id, operation, policy),
         )
     return decisions
 
