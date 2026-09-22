@@ -283,7 +283,7 @@ async def test_a_carrying_rules_required_details_reach_the_credential_source():
     seen_carry = []
 
     class RecordingSource:
-        async def get(self, carry, subject_token=None):
+        async def get(self, carry, subject_token=None, subject_token_expires_at=None):
             seen_carry.append(carry)
             return None
 
@@ -343,7 +343,7 @@ async def test_invalid_arguments_are_rejected_before_policy_is_even_consulted():
 @pytest.mark.anyio
 async def test_outbound_error_from_the_credential_source_is_an_error_result_not_an_exception():
     class RaisingSource:
-        async def get(self, carry, subject_token=None):
+        async def get(self, carry, subject_token=None, subject_token_expires_at=None):
             raise OutboundError("token request to 'https://idp.example.com/token' failed with 401")
 
     async def handler(request: httpx.Request) -> httpx.Response:
@@ -368,3 +368,31 @@ async def test_outbound_error_from_the_credential_source_is_an_error_result_not_
 
     assert result.is_error is True
     assert "billing" in result.content[0].text
+
+
+@pytest.mark.anyio
+async def test_call_accepts_a_per_call_principal_override():
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={})
+
+    cfg = PolicyConfig.model_validate(
+        {
+            "version": "1",
+            "rules": [
+                {
+                    "match": {"effect": ["read_only"]},
+                    "require": {"authorization_details": [{"type": "invoices_read"}]},
+                }
+            ],
+        }
+    )
+    invoker = invoker_with_policy(handler, op(), PolicyEngine(cfg), Principal("local", ()))
+
+    # The instance-default principal (no details) is denied...
+    denied = await invoker.call("list_invoices", {})
+    assert denied.is_error is True
+
+    # ...but a per-call override with the right detail is allowed.
+    override = Principal("http-caller", (AuthorizationDetail(type="invoices_read"),))
+    allowed = await invoker.call("list_invoices", {}, principal=override)
+    assert allowed.is_error is False

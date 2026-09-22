@@ -74,7 +74,12 @@ class ToolInvoker:
     def tools(self) -> list[types.Tool]:
         return [to_mcp_tool(op) for op in self._toolset.operations]
 
-    async def call(self, name: str, arguments: Mapping[str, Any] | None) -> types.CallToolResult:
+    async def call(
+        self,
+        name: str,
+        arguments: Mapping[str, Any] | None,
+        principal: Principal | None = None,
+    ) -> types.CallToolResult:
         operation = self._toolset.by_name.get(name)
         if operation is None:
             return _error(f"unknown tool {name!r}")
@@ -87,7 +92,8 @@ class ToolInvoker:
             where = f" at {field}" if field else ""
             return _error(f"invalid arguments for {name!r}{where}: {exc.message}")
 
-        decision = self._policy.evaluate(operation, self._principal)
+        effective_principal = principal if principal is not None else self._principal
+        decision = self._policy.evaluate(operation, effective_principal)
         if not decision.allowed:
             missing = ", ".join(d.type for d in decision.missing) or "policy default is deny"
             # Never the token/principal contents (§10) — only which
@@ -99,7 +105,13 @@ class ToolInvoker:
             return _error(f"no transport configured for upstream {operation.upstream!r}")
 
         try:
-            response = await transport.execute(operation, args, carry=decision.carry)
+            response = await transport.execute(
+                operation,
+                args,
+                carry=decision.carry,
+                subject_token=effective_principal.subject_token,
+                subject_token_expires_at=effective_principal.subject_token_expires_at,
+            )
         except RequestBuildError as exc:
             return _error(f"invalid arguments for {name!r}: {exc}")
         except httpx.TimeoutException:

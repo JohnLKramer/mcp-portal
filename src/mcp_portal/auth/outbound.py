@@ -128,7 +128,10 @@ class ClientCredentialsSource:
             ) from None
 
     async def get(
-        self, carry: tuple[AuthorizationDetail, ...], subject_token: str | None = None
+        self,
+        carry: tuple[AuthorizationDetail, ...],
+        subject_token: str | None = None,
+        subject_token_expires_at: int | None = None,
     ) -> Credential | None:
         scopes = tuple(sorted(self.outbound.scopes))
         key = f"client_credentials:{self.upstream_key}:{scopes}:{hash(carry)}"
