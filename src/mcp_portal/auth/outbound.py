@@ -6,6 +6,7 @@ client_credentials and token exchange behind the same return type.
 """
 
 import json
+import logging
 from collections.abc import Mapping
 from dataclasses import dataclass
 
@@ -16,6 +17,8 @@ from mcp_portal.auth.token_cache import TokenCache
 from mcp_portal.config.loader import ConfigError
 from mcp_portal.config.models import OutboundConfig
 from mcp_portal.transports.http import Credential
+
+log = logging.getLogger("mcp_portal")
 
 _EXPIRY_LEEWAY_S = 60.0
 
@@ -81,16 +84,27 @@ async def _post_token_request(
         headers={"Accept": "application/json"},
     )
     if response.status_code != 200:
-        raise OutboundError(
-            f"token request to {token_endpoint!r} failed with {response.status_code}: "
-            f"{response.text[:500]}"
+        # The response body may echo request contents (e.g. authorization_details)
+        # back from the IdP, so it only ever goes to the log, never to the
+        # OutboundError message that eventually reaches the MCP client (§10).
+        log.warning(
+            "token request to %r failed with %s: %s",
+            token_endpoint,
+            response.status_code,
+            response.text[:500],
         )
-    payload = response.json()
-    token = payload.get("access_token")
-    if not isinstance(token, str):
-        raise OutboundError(f"token response from {token_endpoint!r} has no 'access_token'")
-    expires_in = payload.get("expires_in", 300)
-    ttl = max(0.0, float(expires_in) - _EXPIRY_LEEWAY_S)
+        raise OutboundError(
+            f"token request to {token_endpoint!r} failed with {response.status_code}"
+        )
+    try:
+        payload = response.json()
+        token = payload.get("access_token")
+        if not isinstance(token, str):
+            raise OutboundError(f"token response from {token_endpoint!r} has no 'access_token'")
+        expires_in = payload.get("expires_in", 300)
+        ttl = max(0.0, float(expires_in) - _EXPIRY_LEEWAY_S)
+    except (ValueError, TypeError) as exc:
+        raise OutboundError(f"token response from {token_endpoint!r} was malformed: {exc}") from exc
     return token, ttl
 
 

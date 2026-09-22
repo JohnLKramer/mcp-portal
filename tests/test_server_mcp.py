@@ -4,6 +4,7 @@ import httpx
 import pytest
 from mcp import types
 
+from mcp_portal.auth.outbound import OutboundError
 from mcp_portal.auth.principal import Principal
 from mcp_portal.auth.rar import AuthorizationDetail
 from mcp_portal.config.models import UpstreamConfig
@@ -337,3 +338,33 @@ async def test_invalid_arguments_are_rejected_before_policy_is_even_consulted():
 
     assert result.is_error is True
     assert "invalid arguments" in result.content[0].text
+
+
+@pytest.mark.anyio
+async def test_outbound_error_from_the_credential_source_is_an_error_result_not_an_exception():
+    class RaisingSource:
+        async def get(self, carry, subject_token=None):
+            raise OutboundError("token request to 'https://idp.example.com/token' failed with 401")
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={})
+
+    operation = op()
+    toolset = ToolSet(operations=(operation,), by_name={operation.name: operation})
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    invoker = ToolInvoker(
+        toolset=toolset,
+        transports={
+            "billing": HttpTransport(
+                client, UpstreamConfig(base_url="https://api.example.com"), RaisingSource()
+            )
+        },
+        policy=PolicyEngine(PolicyConfig(version="1")),
+    )
+
+    # No pytest.raises here: the whole point is that OutboundError never
+    # escapes `call` — it completes normally and returns an error result.
+    result = await invoker.call("list_invoices", {})
+
+    assert result.is_error is True
+    assert "billing" in result.content[0].text

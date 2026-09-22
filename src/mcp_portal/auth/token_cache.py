@@ -54,4 +54,25 @@ class TokenCache:
             self._entries[key] = _CachedToken(
                 value=token, expires_at=time.monotonic() + ttl_seconds
             )
+            self._purge_expired(exclude=key)
             return token
+
+    def _purge_expired(self, exclude: str) -> None:
+        """Drop every entry (and its lock) other than `exclude` whose TTL has
+        passed. Piggybacks on the already-locked `get_or_fetch` path rather
+        than running on a timer, so `client_credentials`'s small, bounded key
+        space costs nothing extra and `token_exchange`'s per-caller keys
+        don't accumulate forever on a long-running server.
+        """
+        now = time.monotonic()
+        expired = [
+            k for k, entry in self._entries.items() if k != exclude and entry.expires_at <= now
+        ]
+        for k in expired:
+            del self._entries[k]
+            lock = self._locks.get(k)
+            # A held lock means another caller is mid-`fetch()` for this key;
+            # dropping it here would let a still-later caller create a fresh
+            # Lock and race that in-flight fetch instead of waiting on it.
+            if lock is not None and not lock.locked():
+                del self._locks[k]

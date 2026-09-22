@@ -83,3 +83,24 @@ async def test_concurrent_callers_for_the_same_key_single_flight_the_fetch():
     assert await first == "token"
     assert await second == "token"
     assert calls == 1
+
+
+@pytest.mark.anyio
+async def test_an_expired_other_entry_is_purged_on_a_later_call_for_a_different_key():
+    async def fetch_a() -> tuple[str, float]:
+        return "a", 0.0  # expires immediately
+
+    async def fetch_b() -> tuple[str, float]:
+        return "b", 60.0
+
+    cache = TokenCache()
+    await cache.get_or_fetch("a", fetch_a)
+    await asyncio.sleep(0)  # let "a"'s TTL elapse
+    assert "a" in cache._entries
+    assert "a" in cache._locks
+
+    await cache.get_or_fetch("b", fetch_b)
+
+    assert "a" not in cache._entries
+    assert "a" not in cache._locks
+    assert "b" in cache._entries
