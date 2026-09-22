@@ -39,9 +39,11 @@ SDK, pytest, ruff, mypy, Hatchling.
 - `examples/` — sample configs (`billing.yaml`, `billing/`, `orders/`) used by
   tests and the quickstart.
 - `schema/` — generated `config-v1.schema.json`; regenerate, don't hand-edit.
-- `docs/superpowers/specs/` — design spec; `docs/superpowers/plans/` —
-  phase-by-phase (P1/P2/P3) implementation plans.
 - `mocks/` — mock backend(s) used by integration tests.
+
+Planning/spec artifacts (design specs, phase-by-phase implementation plans)
+are gitignored (`docs/superpowers/`, `nimbalyst-local/`, `scratch/`) — see
+Agent Guardrails below.
 
 ## Build & Development Commands
 
@@ -79,8 +81,8 @@ Config load → operation sourcing → merge → classify → policy check → e
    denial happens here, before the upstream is ever called — then executes
    via `transports/http.py`.
 
-Key invariants (see `docs/superpowers/specs/2026-09-19-mcp-sidekit-design.md`
-for the full rationale):
+Key invariants (see the local, gitignored design spec under
+`docs/superpowers/specs/` for the full rationale):
 
 - **Match on `id`, never on the generated tool name.** Names change with
   naming strategy, prefixing, truncation, and collision suffixes.
@@ -165,12 +167,19 @@ place to see what's decided and what's still open.
 - **`schema/config-v1.schema.json` is generated, not hand-edited.** Regenerate
   it with `uv run python -m mcp_portal.config.schema` after changing
   `config/models.py`.
-- **Respect phase scope.** Each `docs/superpowers/plans/*.md` file states its
-  own phase's global constraints (what is explicitly out of scope for that
-  phase) — don't add config fields or behavior for a later phase while
-  implementing an earlier one.
+- **Respect phase scope.** Each local `docs/superpowers/plans/*.md` file
+  states its own phase's global constraints (what is explicitly out of scope
+  for that phase) — don't add config fields or behavior for a later phase
+  while implementing an earlier one.
 - **Never weaken the security invariants** listed under Architecture Notes
   (header denylist, `id`-only matching, secrets-as-references, RAR
   accumulate-never-first-match) without updating the design spec first.
 - `.coverage`, `htmlcov/`, `.mypy_cache/`, `.pytest_cache/`, `.ruff_cache/`,
   `.venv/` are generated — do not hand-edit or commit changes to them.
+- **Never commit planning or spec artifacts.** This is a public repo;
+  intermediate planning docs (`docs/superpowers/plans/`,
+  `docs/superpowers/specs/`), scratch notes (`scratch/`), and
+  `nimbalyst-local/` are gitignored and must stay local-only — never `git
+  add` or stage them, even incidentally via `git add -A`/`git add .`. If you
+  need durable planning docs, keep them in one of those gitignored
+  directories, not tracked in the repo.
