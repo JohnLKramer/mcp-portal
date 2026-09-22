@@ -60,6 +60,61 @@ async def test_refresh_is_rate_limited_to_once_per_60_seconds(monkeypatch):
 
 
 @pytest.mark.anyio
+async def test_a_failing_jwks_endpoint_denies_rather_than_raising():
+    """A down or flaky IdP must look like an unknown `kid` — which the verifier
+    turns into a clean 401 — not like an escaping `httpx.HTTPError`, which
+    Starlette's auth middleware does not catch and which would surface as a 500."""
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(503, json={"error": "unavailable"})
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    cache = JwksCache(client, "https://idp.example.com/jwks.json")
+    assert await cache.key_for("k1") is None
+
+
+@pytest.mark.anyio
+async def test_a_failing_jwks_endpoint_leaves_already_cached_keys_usable():
+    responses = [httpx.Response(200, json=JWKS_ONE_KEY), httpx.Response(503, json={})]
+    now = [1000.0]
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return responses.pop(0)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    cache = JwksCache(client, "https://idp.example.com/jwks.json")
+    assert (await cache.key_for("k1"))["kid"] == "k1"
+
+    # A later unknown kid drives a refresh that fails; the key fetched before
+    # the outage must survive it.
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(time, "monotonic", lambda: now[0] + 1000)
+        assert await cache.key_for("ghost") is None
+    assert (await cache.key_for("k1"))["kid"] == "k1"
+
+
+@pytest.mark.anyio
+async def test_a_process_started_near_boot_still_refreshes_on_the_first_call(monkeypatch):
+    """`time.monotonic` is boot-relative on Linux/macOS, so a process started a
+    few seconds after boot sees a `now` smaller than the refresh interval. The
+    first refresh must not be rate-limited away against a zero-initialized
+    timestamp — that would reject every token as an unknown `kid` until the
+    boot clock passed 60s."""
+    calls = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(1)
+        return httpx.Response(200, json=JWKS_ONE_KEY)
+
+    monkeypatch.setattr(time, "monotonic", lambda: 5.0)
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    cache = JwksCache(client, "https://idp.example.com/jwks.json")
+
+    assert (await cache.key_for("k1"))["kid"] == "k1"
+    assert len(calls) == 1
+
+
+@pytest.mark.anyio
 async def test_discover_jwks_uri_prefers_oauth_authorization_server_metadata():
     async def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/.well-known/oauth-authorization-server":

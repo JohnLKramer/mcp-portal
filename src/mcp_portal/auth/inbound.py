@@ -7,12 +7,15 @@ JWKS and turning it into an `AccessToken`.
 """
 
 import asyncio
+import logging
 import time
 from typing import Any
 
 import httpx
 import jwt as pyjwt
 from mcp.server.auth.provider import AccessToken, TokenVerifier
+
+log = logging.getLogger("mcp_portal")
 
 _JWKS_REFRESH_INTERVAL_S = 60.0
 _ACCEPTED_TYP = frozenset({"at+jwt", "jwt"})
@@ -55,7 +58,11 @@ class JwksCache:
         self._client = client
         self._jwks_uri = jwks_uri
         self._keys: dict[str, dict[str, Any]] = {}
-        self._last_refresh: float = 0.0
+        # Not 0.0: `time.monotonic` is boot-relative on Linux/macOS, so a
+        # process started within the refresh window of machine boot would see
+        # its very first refresh rate-limited away and reject every token as an
+        # unknown `kid` until the clock caught up.
+        self._last_refresh: float = float("-inf")
         self._lock = asyncio.Lock()
 
     async def key_for(self, kid: str) -> dict[str, Any] | None:
@@ -70,9 +77,23 @@ class JwksCache:
             now = time.monotonic()
             if now - self._last_refresh < _JWKS_REFRESH_INTERVAL_S:
                 return
-            response = await self._client.get(self._jwks_uri)
-            response.raise_for_status()
-            for jwk in response.json().get("keys", []):
+            # A flaky or down IdP must deny tokens, not crash the request:
+            # Starlette's `AuthenticationMiddleware` only catches
+            # `AuthenticationError`, so an escaping `httpx.HTTPError` would
+            # become an unhandled 500 instead of the clean 401 every other
+            # invalid-token path in this module produces. `self._keys` is left
+            # untouched so previously-cached keys stay usable, and
+            # `_last_refresh` still advances so a persistently-down IdP is
+            # retried once per window rather than on every request.
+            try:
+                response = await self._client.get(self._jwks_uri)
+                response.raise_for_status()
+                keys = response.json().get("keys", [])
+            except httpx.HTTPError as exc:
+                log.warning("JWKS refresh from %s failed: %s", self._jwks_uri, exc)
+                self._last_refresh = now
+                return
+            for jwk in keys:
                 kid = jwk.get("kid")
                 if isinstance(kid, str):
                     self._keys[kid] = jwk

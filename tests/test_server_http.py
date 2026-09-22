@@ -280,6 +280,85 @@ async def test_a_host_header_matching_the_audience_is_not_rejected(
 
 
 @pytest.mark.anyio
+async def test_localhost_is_accepted_under_the_default_loopback_bind(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, jwk: dict[str, Any]
+) -> None:
+    """`http://localhost:8443/mcp` is as valid and as documented a way to reach a
+    server bound to `127.0.0.1` as the dotted-quad is, and it puts
+    `Host: localhost:8443` on the wire. Deriving the allow-list from the bind
+    address alone would 421 that on a fresh install."""
+    async with _client_for(tmp_path, monkeypatch, _config(), handler=_idp_handler(jwk)) as client:
+        response = await client.post(
+            "/mcp",
+            json=_rpc("tools/call", name="list_invoices", arguments={}),
+            headers=MCP_HEADERS | {"Host": "localhost:8443"},
+        )
+
+    assert response.status_code != 421
+    assert response.status_code == 200
+    assert "invoices" in response.text
+
+
+@pytest.mark.anyio
+async def test_a_bracketed_ipv6_loopback_host_header_is_accepted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, jwk: dict[str, Any]
+) -> None:
+    """An IPv6 literal is written unbracketed in config (`host: "::1"`) but
+    bracketed on the wire (`Host: [::1]:8443`). Copying the config spelling into
+    the allow-list would never match, 421ing every request."""
+    config = _config(
+        server={
+            "name": "s",
+            "transport": "http",
+            "http": {"host": "::1", "allowed_origins": ["https://client.example.com"]},
+        }
+    )
+    async with _client_for(tmp_path, monkeypatch, config, handler=_idp_handler(jwk)) as client:
+        response = await client.post(
+            "/mcp",
+            json=_rpc("tools/call", name="list_invoices", arguments={}),
+            headers=MCP_HEADERS | {"Host": "[::1]:8443"},
+        )
+
+    assert response.status_code != 421
+    assert response.status_code == 200
+    assert "invoices" in response.text
+
+
+@pytest.mark.anyio
+async def test_a_configured_allowed_host_is_accepted_on_a_wildcard_bind(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, jwk: dict[str, Any]
+) -> None:
+    """Binding `0.0.0.0` with `allow_unauthenticated_http` is a combination the
+    config validators explicitly permit, but no client ever sends
+    `Host: 0.0.0.0` — without `server.http.allowed_hosts` the operator has no way
+    to name the host their clients actually use, and the sanctioned escape hatch
+    421s every request."""
+    config = _config(
+        server={
+            "name": "s",
+            "transport": "http",
+            "http": {
+                "host": "0.0.0.0",
+                "allowed_origins": ["https://client.example.com"],
+                "allowed_hosts": ["gateway.example.com"],
+            },
+        },
+        auth={"inbound": {"allow_unauthenticated_http": True}},
+    )
+    async with _client_for(tmp_path, monkeypatch, config, handler=_idp_handler(jwk)) as client:
+        response = await client.post(
+            "/mcp",
+            json=_rpc("tools/call", name="list_invoices", arguments={}),
+            headers=MCP_HEADERS | {"Host": "gateway.example.com"},
+        )
+
+    assert response.status_code != 421
+    assert response.status_code == 200
+    assert "invoices" in response.text
+
+
+@pytest.mark.anyio
 async def test_inbound_disabled_on_loopback_uses_the_local_principal(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, jwk: dict[str, Any]
 ) -> None:

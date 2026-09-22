@@ -29,7 +29,7 @@ from mcp_portal.app import App
 from mcp_portal.auth.inbound import InboundAuthError, JwksCache, JwtTokenVerifier, discover_jwks_uri
 from mcp_portal.auth.principal import Principal, local_principal, principal_from_access_token
 from mcp_portal.config.loader import ConfigError
-from mcp_portal.config.models import Config, InboundAuthConfig
+from mcp_portal.config.models import LOOPBACK_HOSTS, Config, InboundAuthConfig
 
 log = logging.getLogger("mcp_portal")
 
@@ -81,18 +81,33 @@ class _InboundVerifier(TokenVerifier):
 def _security_settings(config: Config) -> TransportSecuritySettings:
     """Host/Origin allow-lists for the SDK's DNS-rebinding defense.
 
-    The Host allow-list always includes the address this server is configured
-    to *bind* to (loopback/local access still needs to work), but that is not
-    necessarily how a real client *reaches* it — behind a reverse proxy, bound
-    to `0.0.0.0`, or addressed by a real DNS name, the bind address and the
-    public hostname differ. When inbound auth is enabled, `auth.inbound.audience`
-    is this server's public resource identifier (an absolute http(s) URL,
-    validated by `InboundAuthConfig._enabled_needs_issuer_and_audience`), so its
-    hostname (and port, if given) is allowed too. With inbound auth disabled
-    there is no audience to fall back to, so only the bind address applies.
+    The Host allow-list has to name how a client *reaches* this server, which
+    is not the same thing as the address it *binds* to.
+
+    On a loopback bind the three loopback spellings are interchangeable — a
+    client told to use `127.0.0.1` may equally well be pointed at `localhost`
+    or `[::1]` — so all three are allowed at any port, matching the `mcp` SDK's
+    own default (`Server.streamable_http_app`). Deriving the list from the bind
+    address alone would 421 a perfectly ordinary `Host: localhost:8443`, and
+    would never match an IPv6 bind at all, since the wire format brackets the
+    literal (`[::1]:8443`) while the config does not.
+
+    On a non-loopback bind the bind address is still allowed (bracketed, for an
+    IPv6 literal), but it is frequently not what clients send: behind a reverse
+    proxy, or bound to `0.0.0.0`, the public hostname differs, so
+    `server.http.allowed_hosts` lets the operator name it. When inbound auth is
+    enabled, `auth.inbound.audience` is this server's public resource identifier
+    (an absolute http(s) URL, validated by
+    `InboundAuthConfig._enabled_needs_issuer_and_audience`), so its hostname
+    (and port, if given) is allowed too.
     """
     http = config.server.http
-    allowed_hosts = [f"{http.host}:{http.port}", http.host]
+    if http.host in LOOPBACK_HOSTS:
+        allowed_hosts = ["127.0.0.1:*", "localhost:*", "[::1]:*"]
+    else:
+        host = f"[{http.host}]" if ":" in http.host and not http.host.startswith("[") else http.host
+        allowed_hosts = [f"{host}:{http.port}", host]
+    allowed_hosts += list(http.allowed_hosts)
     inbound = config.auth.inbound
     if inbound.enabled and inbound.audience is not None:
         audience = urlparse(inbound.audience)

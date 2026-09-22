@@ -60,7 +60,7 @@ class IntrospectionConfig(Base):
     openapi: OpenApiIntrospectionConfig
 
 
-_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 
 
 class HttpServerConfig(Base):
@@ -68,6 +68,12 @@ class HttpServerConfig(Base):
     port: int = Field(default=8443, gt=0, lt=65536)
     path: str = "/mcp"
     allowed_origins: list[str] = Field(default_factory=list)
+    # The `Host` header values real clients send, which need not be the bind
+    # address: behind a reverse proxy, or bound to `0.0.0.0`, no client ever
+    # sends `Host: 0.0.0.0`. Without this an operator using the sanctioned
+    # non-loopback escape hatch has no way to name their public hostname, and
+    # the SDK's DNS-rebinding defense rejects every request with a 421.
+    allowed_hosts: list[str] = Field(default_factory=list)
 
 
 class OutboundConfig(Base):
@@ -307,7 +313,7 @@ class Config(Base):
     def _unauthenticated_http_is_guarded(self) -> Self:
         if self.server.transport != "http" or self.auth.inbound.enabled:
             return self
-        if self.server.http.host in _LOOPBACK_HOSTS:
+        if self.server.http.host in LOOPBACK_HOSTS:
             return self
         if self.auth.inbound.allow_unauthenticated_http:
             return self

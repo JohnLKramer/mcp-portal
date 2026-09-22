@@ -302,7 +302,7 @@ async def test_build_app_with_no_policy_file_allows_every_call(
 
 
 def test_build_app_wires_the_configured_local_principal(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog
 ):
     monkeypatch.setenv("BILLING_KEY", "sk-test")
     payload = CONFIG | {
@@ -313,8 +313,37 @@ def test_build_app_wires_the_configured_local_principal(
         }
     }
     loaded = load_config(_write_config(tmp_path, payload))
-    app = build_app(loaded)
+    with caplog.at_level(logging.INFO, logger="mcp_portal"):
+        app = build_app(loaded)
     assert app.invoker._principal.authorization_details[0].type == "payment_initiation"
+    # The positive control for the http case below: the stdio banner does fire
+    # here, so its absence there means the transport check, not a broken assert.
+    assert "local principal in effect for stdio" in caplog.text
+
+
+def test_transport_http_defaults_the_invoker_to_a_no_authority_principal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog
+):
+    """Under `transport: http` every call resolves its own principal per request,
+    so the invoker's instance default is only ever reached by a caller that
+    forgot the keyword. That default must therefore carry no authority — the
+    configured local principal's self-asserted grants belong to stdio only — and
+    the stdio-specific banner must not claim otherwise."""
+    monkeypatch.setenv("BILLING_KEY", "sk-test")
+    payload = CONFIG | {
+        "server": {"name": "billing-portal", "transport": "http"},
+        "auth": {
+            "local_principal": {
+                "authorization_details": [{"type": "payment_initiation", "actions": ["initiate"]}]
+            }
+        },
+    }
+    loaded = load_config(_write_config(tmp_path, payload))
+    with caplog.at_level(logging.INFO, logger="mcp_portal"):
+        app = build_app(loaded)
+
+    assert app.invoker._principal.authorization_details == ()
+    assert "local principal in effect for stdio" not in caplog.text
 
 
 @pytest.mark.anyio

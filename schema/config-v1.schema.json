@@ -159,6 +159,13 @@
           },
           "title": "Allowed Origins",
           "type": "array"
+        },
+        "allowed_hosts": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Allowed Hosts",
+          "type": "array"
         }
       },
       "title": "HttpServerConfig",
