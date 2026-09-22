@@ -126,7 +126,8 @@ class JwtTokenVerifier(TokenVerifier):
         alg = header.get("alg")
         if alg not in self._algorithms:
             return None
-        if header.get("typ", "").lower() not in _ACCEPTED_TYP:
+        typ = header.get("typ", "")
+        if not isinstance(typ, str) or typ.lower() not in _ACCEPTED_TYP:
             return None
 
         kid = header.get("kid")

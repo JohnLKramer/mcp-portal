@@ -169,6 +169,40 @@ async def test_typ_none_of_the_two_accepted_values_is_rejected(rsa_key, jwk):
 
 
 @pytest.mark.anyio
+async def test_a_null_typ_header_value_is_rejected_rather_than_raising(rsa_key, jwk):
+    """A crafted, unverified header can have `typ: null` (a valid JSON value
+    PyJWT's `get_unverified_header` happily returns), as opposed to the `typ`
+    key simply being absent (already covered by the default `""` in
+    `header.get("typ", "")`). `jwt.encode(..., headers={"typ": None})` drops
+    the key entirely rather than emitting a null, so it can't be used to
+    construct this case — the header has to be hand-built the same way the
+    HS256 key-confusion test below does, to actually put a JSON `null` in
+    the `typ` slot and reach the vulnerable `.lower()` call before signature
+    verification.
+    """
+    import base64
+    import json
+
+    now = int(time.time())
+    header = {"alg": "RS256", "typ": None, "kid": "test-kid"}
+    payload = {
+        "iss": "https://idp.example.com",
+        "aud": "https://api.example.com/mcp",
+        "exp": now + 300,
+    }
+
+    def _b64url(data: bytes) -> str:
+        return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
+
+    signing_input = (
+        f"{_b64url(json.dumps(header).encode())}.{_b64url(json.dumps(payload).encode())}"
+    )
+    raw = f"{signing_input}.{_b64url(b'not-a-real-signature')}"
+
+    assert await verifier(jwk).verify_token(raw) is None
+
+
+@pytest.mark.anyio
 async def test_alg_none_is_rejected_unconditionally(jwk):
     now = int(time.time())
     raw = jwt.encode(
