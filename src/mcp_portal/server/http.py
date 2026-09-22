@@ -13,6 +13,7 @@ per-request `Principal` a policy decision is evaluated against.
 import contextlib
 import logging
 from collections.abc import AsyncIterator, Mapping
+from urllib.parse import urlparse
 
 import httpx
 from mcp import types
@@ -80,14 +81,28 @@ class _InboundVerifier(TokenVerifier):
 def _security_settings(config: Config) -> TransportSecuritySettings:
     """Host/Origin allow-lists for the SDK's DNS-rebinding defense.
 
-    The Host allow-list is the address this server is configured to be reached
-    on; the Origin allow-list is `server.http.allowed_origins` verbatim, so an
-    empty list rejects every cross-origin browser request.
+    The Host allow-list always includes the address this server is configured
+    to *bind* to (loopback/local access still needs to work), but that is not
+    necessarily how a real client *reaches* it — behind a reverse proxy, bound
+    to `0.0.0.0`, or addressed by a real DNS name, the bind address and the
+    public hostname differ. When inbound auth is enabled, `auth.inbound.audience`
+    is this server's public resource identifier (an absolute http(s) URL,
+    validated by `InboundAuthConfig._enabled_needs_issuer_and_audience`), so its
+    hostname (and port, if given) is allowed too. With inbound auth disabled
+    there is no audience to fall back to, so only the bind address applies.
     """
     http = config.server.http
+    allowed_hosts = [f"{http.host}:{http.port}", http.host]
+    inbound = config.auth.inbound
+    if inbound.enabled and inbound.audience is not None:
+        audience = urlparse(inbound.audience)
+        if audience.hostname is not None:
+            allowed_hosts.append(audience.hostname)
+            if audience.port is not None:
+                allowed_hosts.append(f"{audience.hostname}:{audience.port}")
     return TransportSecuritySettings(
         enable_dns_rebinding_protection=True,
-        allowed_hosts=[f"{http.host}:{http.port}", http.host],
+        allowed_hosts=allowed_hosts,
         allowed_origins=list(http.allowed_origins),
     )
 
@@ -194,11 +209,16 @@ def build_http_app(app: App, config: Config, secrets: Mapping[str, str]) -> Star
     inbound = config.auth.inbound
     verifier = _InboundVerifier(inbound) if inbound.enabled else None
     if verifier is None:
-        log.info(
-            "transport 'http' with auth.inbound.enabled=false: the local principal applies "
-            "to every request. This is a guardrail against an over-eager agent, not a "
-            "security boundary — anyone who can reach this endpoint can call the upstream "
-            "directly."
+        http = config.server.http
+        names = sorted(tool.name for tool in app.invoker.tools())
+        log.warning(
+            "transport 'http' with auth.inbound.enabled=false on %s: the local principal "
+            "applies to every request for %d tool(s): %s. This is a guardrail against an "
+            "over-eager agent, not a security boundary — anyone who can reach this endpoint "
+            "can call the upstream directly.",
+            f"{http.host}:{http.port}",
+            len(names),
+            ", ".join(names) or "(none)",
         )
 
     server = _build_server(app, config, verifier)

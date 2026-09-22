@@ -251,6 +251,35 @@ async def test_a_valid_bearer_token_reaches_the_tool_call(
 
 
 @pytest.mark.anyio
+async def test_a_host_header_matching_the_audience_is_not_rejected(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    rsa_key: rsa.RSAPrivateKey,
+    jwk: dict[str, Any],
+) -> None:
+    """`auth.inbound.audience` names the public host clients actually reach the
+    server through (`https://api.example.com/mcp`), which is unrelated to the
+    loopback bind address (`server.http.host`, defaulted to `127.0.0.1`). A
+    request whose `Host` header names the audience's hostname must be allowed
+    through the SDK's DNS-rebinding defense, not rejected with a 421 — proving
+    the allow-list is built from the public resource identifier, not just the
+    bind address."""
+    async with _client_for(
+        tmp_path, monkeypatch, _config(auth=INBOUND), handler=_idp_handler(jwk)
+    ) as client:
+        token = _bearer(rsa_key)
+        response = await client.post(
+            "/mcp",
+            json=_rpc("tools/call", name="list_invoices", arguments={}),
+            headers=MCP_HEADERS | {"Authorization": f"Bearer {token}", "Host": "api.example.com"},
+        )
+
+    assert response.status_code != 421
+    assert response.status_code == 200
+    assert "invoices" in response.text
+
+
+@pytest.mark.anyio
 async def test_inbound_disabled_on_loopback_uses_the_local_principal(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, jwk: dict[str, Any]
 ) -> None:
