@@ -9,6 +9,8 @@ applies, since `Principal` is transport-agnostic.
 
 from dataclasses import dataclass
 
+from mcp.server.auth.provider import AccessToken
+
 from mcp_portal.auth.rar import AuthorizationDetail, RarError, parse_authorization_details
 from mcp_portal.config.loader import ConfigError
 from mcp_portal.config.models import LocalPrincipalConfig
@@ -18,6 +20,8 @@ from mcp_portal.config.models import LocalPrincipalConfig
 class Principal:
     identity: str
     authorization_details: tuple[AuthorizationDetail, ...]
+    subject_token: str | None = None
+    subject_token_expires_at: int | None = None
 
 
 def local_principal(config: LocalPrincipalConfig) -> Principal:
@@ -34,3 +38,25 @@ def local_principal(config: LocalPrincipalConfig) -> Principal:
     except RarError as exc:
         raise ConfigError(f"auth.local_principal.authorization_details: {exc}") from exc
     return Principal(identity="local", authorization_details=details)
+
+
+def principal_from_access_token(access_token: AccessToken) -> Principal | None:
+    """Build the principal a validated HTTP bearer token represents (§8).
+
+    Returns `None` when `authorization_details` is present but malformed —
+    the caller (the bearer-auth wiring in `server/http.py`) must deny the
+    request rather than treat it as an absent claim, matching
+    `JwtTokenVerifier`'s own rule for the same claim.
+    """
+    raw_details = (access_token.claims or {}).get("authorization_details", [])
+    try:
+        details = parse_authorization_details(raw_details)
+    except RarError:
+        return None
+    identity = access_token.subject or access_token.client_id
+    return Principal(
+        identity=identity,
+        authorization_details=details,
+        subject_token=access_token.token,
+        subject_token_expires_at=access_token.expires_at,
+    )
