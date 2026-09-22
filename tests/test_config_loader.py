@@ -8,9 +8,11 @@ from mcp_portal.config.loader import (
     check_operation_headers,
     credential_headers_for,
     load_config,
+    load_policy_file,
     resolve_secret,
 )
-from mcp_portal.config.models import Config
+from mcp_portal.config.models import Config, PolicyFileConfig
+from mcp_portal.config.policy import PolicyConfig
 from mcp_portal.operations import (
     Effect,
     HttpBinding,
@@ -235,3 +237,47 @@ def test_check_operation_headers_rejects_a_configured_credential_header():
 
 def test_check_operation_headers_allows_an_ordinary_header():
     check_operation_headers([header_op("X-Trace-Id")], frozenset())  # does not raise
+
+
+def test_load_config_with_no_policy_field_has_no_policy(tmp_path: Path):
+    loaded = load_config(write(tmp_path, MINIMAL))
+    assert loaded.policy is None
+
+
+def test_load_config_resolves_a_policy_file_relative_to_the_config_directory(tmp_path: Path):
+    (tmp_path / "rar-policy.yaml").write_text("version: '1'\ndefaults: {unmatched: deny}\n")
+    loaded = load_config(write(tmp_path, MINIMAL | {"policy": {"file": "./rar-policy.yaml"}}))
+    assert loaded.policy is not None
+    assert loaded.policy.defaults.unmatched == "deny"
+
+
+def test_load_config_resolves_policy_file_relative_to_config_dir_when_launched_elsewhere(
+    tmp_path: Path, monkeypatch
+):
+    (tmp_path / "rar-policy.yaml").write_text("version: '1'\n")
+    monkeypatch.chdir(tmp_path.parent)
+    loaded = load_config(write(tmp_path, MINIMAL | {"policy": {"file": "rar-policy.yaml"}}))
+    assert loaded.policy is not None
+
+
+def test_load_config_raises_a_config_error_for_a_missing_policy_file(tmp_path: Path):
+    with pytest.raises(ConfigError):
+        load_config(write(tmp_path, MINIMAL | {"policy": {"file": "./nope.yaml"}}))
+
+
+def test_load_config_raises_a_config_error_for_an_invalid_policy_file(tmp_path: Path):
+    (tmp_path / "rar-policy.yaml").write_text("version: '1'\ndefaults: {unmatched: bogus}\n")
+    with pytest.raises(ConfigError):
+        load_config(write(tmp_path, MINIMAL | {"policy": {"file": "./rar-policy.yaml"}}))
+
+
+def test_load_policy_file_reads_json(tmp_path: Path):
+    (tmp_path / "policy.json").write_text('{"version": "1"}')
+    policy = load_policy_file(PolicyFileConfig(file="policy.json"), tmp_path)
+    assert isinstance(policy, PolicyConfig)
+
+
+def test_load_policy_file_reads_yaml(tmp_path: Path):
+    (tmp_path / "policy.yaml").write_text("version: '1'\n")
+    policy = load_policy_file(PolicyFileConfig(file="policy.yaml"), tmp_path)
+    assert policy.version == "1"
