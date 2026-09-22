@@ -10,7 +10,7 @@ from itertools import groupby
 
 from mcp_portal.configure.decisions import OperationDecision, RequiredDetail, SurveyResult
 from mcp_portal.configure.interaction import Prompter
-from mcp_portal.operations import Effect, Operation
+from mcp_portal.operations import Effect, Operation, Sensitivity
 
 UNGROUPED_TAG = "(ungrouped)"
 
@@ -46,13 +46,10 @@ def _survey_one(
             require=None,
         )
 
-    # Sensitivity is carried over from the default (introspected or, on a
-    # reconcile re-survey, the previously recorded decision) rather than
-    # asked about here — a per-operation "mark sensitive?" prompt on top of
-    # the expose/RAR prompts would double the question count for no signal
-    # the group-level walk doesn't already give the operator a chance to
-    # flag via the operation's own description.
-    sensitivity = default.sensitivity
+    mark_sensitive = prompter.confirm(
+        f"  mark {op.id!r} sensitive?", default=default.sensitivity is Sensitivity.SENSITIVE
+    )
+    sensitivity = Sensitivity.SENSITIVE if mark_sensitive else Sensitivity.NORMAL
 
     require = default.require
     if op.effect is not Effect.READ_ONLY:

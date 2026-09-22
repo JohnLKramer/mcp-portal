@@ -35,9 +35,9 @@ def test_group_level_yes_exposes_every_operation_in_the_tag_without_further_prom
 def test_group_level_no_falls_through_to_per_operation_prompts():
     ops = [_op("list_invoices", tags=("billing",)), _op("get_invoice", tags=("billing",))]
     # Group-level "no", then per-operation: expose list_invoices (yes),
-    # skip its sensitivity-override prompt (default NORMAL -> no override
-    # question asked for a read_only/normal op), expose get_invoice (no).
-    prompter = ScriptedPrompter(confirms=[False, True, False], texts=[])
+    # mark list_invoices sensitive (no), expose get_invoice (no) — get_invoice
+    # is not exposed so it never reaches the sensitivity prompt.
+    prompter = ScriptedPrompter(confirms=[False, True, False, False], texts=[])
     result = run_survey(ops, prompter)
 
     by_id = {d.operation.id: d for d in result.decisions}
@@ -47,11 +47,9 @@ def test_group_level_no_falls_through_to_per_operation_prompts():
 
 def test_action_effect_operations_prompt_for_a_required_rar_detail():
     ops = [_op("create_invoice", tags=("billing",), method="POST")]
-    # Group-level no (single-op tag skips straight to per-op prompt in
-    # this implementation's group-of-one shortcut is not assumed here —
-    # script both a group and a per-op confirm to be safe), expose: yes,
-    # then a confirm to attach a RAR requirement, then its type.
-    prompter = ScriptedPrompter(confirms=[False, True, True], texts=["payment_initiation"])
+    # Group-level no, expose: yes, mark sensitive: no, then a confirm to
+    # attach a RAR requirement, then its type.
+    prompter = ScriptedPrompter(confirms=[False, True, False, True], texts=["payment_initiation"])
     result = run_survey(ops, prompter)
 
     decision = result.decisions[0]
@@ -62,7 +60,7 @@ def test_action_effect_operations_prompt_for_a_required_rar_detail():
 
 def test_read_only_operations_are_never_asked_for_a_rar_requirement():
     ops = [_op("list_invoices", tags=("billing",))]
-    prompter = ScriptedPrompter(confirms=[False, True], texts=[])
+    prompter = ScriptedPrompter(confirms=[False, True, False], texts=[])
     result = run_survey(ops, prompter)
 
     assert result.decisions[0].require is None
