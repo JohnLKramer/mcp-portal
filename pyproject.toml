@@ -14,6 +14,8 @@ dependencies = [
     "httpx>=0.28",
     "ruamel.yaml>=0.19",
     "jsonschema>=4.26",
+    "pyjwt[crypto]>=2.14,<3",
+    "uvicorn>=0.34,<1",
 ]
 
 [dependency-groups]

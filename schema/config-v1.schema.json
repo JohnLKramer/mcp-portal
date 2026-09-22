@@ -5,6 +5,9 @@
       "properties": {
         "local_principal": {
           "$ref": "#/$defs/LocalPrincipalConfig"
+        },
+        "inbound": {
+          "$ref": "#/$defs/InboundAuthConfig"
         }
       },
       "title": "AuthConfig",
@@ -129,6 +132,113 @@
       ],
       "title": "Effect",
       "type": "string"
+    },
+    "HttpServerConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "host": {
+          "default": "127.0.0.1",
+          "title": "Host",
+          "type": "string"
+        },
+        "port": {
+          "default": 8443,
+          "exclusiveMaximum": 65536,
+          "exclusiveMinimum": 0,
+          "title": "Port",
+          "type": "integer"
+        },
+        "path": {
+          "default": "/mcp",
+          "title": "Path",
+          "type": "string"
+        },
+        "allowed_origins": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Allowed Origins",
+          "type": "array"
+        }
+      },
+      "title": "HttpServerConfig",
+      "type": "object"
+    },
+    "InboundAuthConfig": {
+      "additionalProperties": false,
+      "description": "RFC 9068 access-token validation for `transport: http` (\u00a78).\n\n`algorithms` intentionally has no way to re-admit `alg: none` \u2014 the\nvalidator below rejects it even if a future operator adds it by hand.\nHMAC (`HS*`) is not excluded outright (RFC 9396 does not forbid it and\nan operator's IdP might legitimately use it), but v1 has no\nshared-secret config field, so JWKS-only key lookup makes an\nHS*-allowlisted deployment fail closed rather than succeed via\nkey-confusion.",
+      "properties": {
+        "enabled": {
+          "default": false,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "issuer": {
+          "anyOf": [
+            {
+              "pattern": "^https?://[^/?#\\s]+",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Issuer"
+        },
+        "audience": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Audience"
+        },
+        "jwks_uri": {
+          "anyOf": [
+            {
+              "pattern": "^https?://[^/?#\\s]+",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Jwks Uri"
+        },
+        "required_scopes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Required Scopes",
+          "type": "array"
+        },
+        "algorithms": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Algorithms",
+          "type": "array"
+        },
+        "leeway_s": {
+          "default": 60.0,
+          "minimum": 0,
+          "title": "Leeway S",
+          "type": "number"
+        },
+        "allow_unauthenticated_http": {
+          "default": false,
+          "title": "Allow Unauthenticated Http",
+          "type": "boolean"
+        }
+      },
+      "title": "InboundAuthConfig",
+      "type": "object"
     },
     "IntrospectionConfig": {
       "additionalProperties": false,
@@ -359,7 +469,8 @@
           "enum": [
             "none",
             "static",
-            "client_credentials"
+            "client_credentials",
+            "token_exchange"
           ],
           "title": "Mode",
           "type": "string"
@@ -438,6 +549,35 @@
           },
           "title": "Scopes",
           "type": "array"
+        },
+        "audience": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Audience"
+        },
+        "resource": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resource"
+        },
+        "requested_token_type": {
+          "default": "urn:ietf:params:oauth:token-type:access_token",
+          "title": "Requested Token Type",
+          "type": "string"
         }
       },
       "title": "OutboundConfig",
@@ -585,10 +725,16 @@
           "type": "string"
         },
         "transport": {
-          "const": "stdio",
           "default": "stdio",
+          "enum": [
+            "stdio",
+            "http"
+          ],
           "title": "Transport",
           "type": "string"
+        },
+        "http": {
+          "$ref": "#/$defs/HttpServerConfig"
         }
       },
       "required": [
