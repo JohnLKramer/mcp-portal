@@ -31,7 +31,7 @@ def annotations_for(operation: Operation) -> types.ToolAnnotations:
         read_only_hint=read_only,
         destructive_hint=destructive,
         idempotent_hint=idempotent,
-        # Always true: the sidecar calls an external system whose state it does not control.
+        # Always true: the gateway calls an external system whose state it does not control.
         open_world_hint=True,
     )
 
