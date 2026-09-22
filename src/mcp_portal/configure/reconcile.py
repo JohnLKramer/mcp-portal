@@ -1,0 +1,128 @@
+"""Reconcile a fresh introspection against a previous `configure` run
+(§7 of the design): new operations are surveyed, removed ones are flagged
+(never silently dropped — `ReconcileReport.removed` is always printed by
+the CLI before the confirm-and-write step in Task 7), changed input
+schemas are re-confirmed, and unchanged operations are left exactly as
+recorded.
+"""
+
+from collections.abc import Sequence
+from dataclasses import dataclass
+
+from mcp_portal.config.models import Config
+from mcp_portal.config.policy import PolicyConfig
+from mcp_portal.configure.decisions import OperationDecision, RequiredDetail, SurveyResult
+from mcp_portal.configure.interaction import Prompter
+from mcp_portal.configure.survey import run_survey
+from mcp_portal.operations import Effect, HttpBinding, Operation, Sensitivity
+
+
+def _require_for(op_id: str, policy: PolicyConfig | None) -> RequiredDetail | None:
+    if policy is None:
+        return None
+    for rule in policy.rules:
+        if op_id in rule.match.ids and rule.require is not None:
+            first = rule.require.authorization_details[0]
+            return RequiredDetail(type=first.type, actions=tuple(first.actions or ()))
+    return None
+
+
+def decisions_from_config(
+    config: Config, policy: PolicyConfig | None
+) -> dict[str, OperationDecision]:
+    """Reconstruct the decision that must have produced each recorded
+    `OperationEntry`. Every currently-configured operation is, by
+    construction, exposed — an excluded operation is simply absent from
+    `operations[]`."""
+    decisions: dict[str, OperationDecision] = {}
+    for entry in config.operations:
+        binding = entry.binding
+        operation = Operation(
+            id=entry.id,
+            upstream=entry.upstream,
+            name=entry.name or entry.id,
+            title=entry.title or entry.description,
+            description=entry.description,
+            group_tags=tuple(entry.group_tags),
+            effect=entry.effect or _fallback_effect(binding.method),
+            sensitivity=entry.sensitivity or Sensitivity.NORMAL,
+            input_schema={},
+            binding=HttpBinding(method=binding.method, path=binding.path),
+        )
+        decisions[entry.id] = OperationDecision(
+            operation=operation,
+            exposed=True,
+            effect=operation.effect,
+            sensitivity=operation.sensitivity,
+            require=_require_for(entry.id, policy),
+        )
+    return decisions
+
+
+def _fallback_effect(method: str) -> Effect:
+    from mcp_portal.classify import effect_for_method
+
+    return effect_for_method(method)
+
+
+@dataclass(frozen=True, slots=True)
+class ReconcileReport:
+    new: tuple[str, ...] = ()
+    removed: tuple[str, ...] = ()
+    changed: tuple[str, ...] = ()
+    unchanged: tuple[str, ...] = ()
+
+
+def _binding_key(binding: object) -> tuple[object, ...]:
+    assert isinstance(binding, HttpBinding)
+    return (
+        binding.method,
+        binding.path,
+        tuple((p.arg, p.location, p.wire_name, p.required) for p in binding.parameters),
+        binding.body.schema if binding.body else None,
+    )
+
+
+def diff_operation_ids(
+    previous: dict[str, OperationDecision], current: Sequence[Operation]
+) -> ReconcileReport:
+    current_by_id = {op.id: op for op in current}
+
+    new = tuple(sorted(set(current_by_id) - set(previous)))
+    removed = tuple(sorted(set(previous) - set(current_by_id)))
+
+    changed: list[str] = []
+    unchanged: list[str] = []
+    for op_id in sorted(set(previous) & set(current_by_id)):
+        if _binding_key(previous[op_id].operation.binding) == _binding_key(
+            current_by_id[op_id].binding
+        ):
+            unchanged.append(op_id)
+        else:
+            changed.append(op_id)
+
+    return ReconcileReport(
+        new=new, removed=removed, changed=tuple(changed), unchanged=tuple(unchanged)
+    )
+
+
+def run_reconcile(
+    current: Sequence[Operation],
+    previous: dict[str, OperationDecision],
+    prompter: Prompter,
+) -> tuple[SurveyResult, ReconcileReport]:
+    report = diff_operation_ids(previous, current)
+    current_by_id = {op.id: op for op in current}
+
+    unchanged_decisions = [previous[op_id] for op_id in report.unchanged]
+
+    to_survey = [current_by_id[op_id] for op_id in (*report.new, *report.changed)]
+    survey_defaults = {op_id: previous[op_id] for op_id in report.changed if op_id in previous}
+    surveyed = (
+        run_survey(to_survey, prompter, defaults=survey_defaults)
+        if to_survey
+        else SurveyResult(decisions=())
+    )
+
+    combined = tuple(unchanged_decisions) + surveyed.decisions
+    return SurveyResult(decisions=combined, warnings=surveyed.warnings), report

@@ -1,0 +1,137 @@
+from mcp_portal.config.models import (
+    BindingEntry,
+    Config,
+    OperationEntry,
+    ServerConfig,
+    UpstreamConfig,
+)
+from mcp_portal.configure.interaction import ScriptedPrompter
+from mcp_portal.configure.reconcile import decisions_from_config, diff_operation_ids, run_reconcile
+from mcp_portal.operations import Effect, HttpBinding, Operation, Sensitivity
+
+
+def _op(op_id: str, *, path: str = "/x", method: str = "GET") -> Operation:
+    effect = Effect.READ_ONLY if method == "GET" else Effect.ACTION
+    return Operation(
+        id=op_id,
+        upstream="billing",
+        name=op_id,
+        title=op_id,
+        description=op_id,
+        group_tags=("billing",),
+        effect=effect,
+        sensitivity=Sensitivity.NORMAL,
+        input_schema={"type": "object", "properties": {}},
+        binding=HttpBinding(method=method, path=path),
+    )
+
+
+def _config_with(*entries: OperationEntry) -> Config:
+    return Config(
+        version="1",
+        mode="introspect-safe",
+        server=ServerConfig(name="s", transport="stdio"),
+        upstreams={"billing": UpstreamConfig(base_url="https://api.example.com")},
+        operations=list(entries),
+    )
+
+
+def test_decisions_from_config_reconstructs_exposure_effect_and_sensitivity():
+    entry = OperationEntry(
+        id="list_invoices",
+        upstream="billing",
+        description="List invoices.",
+        effect=Effect.READ_ONLY,
+        sensitivity=Sensitivity.SENSITIVE,
+        binding=BindingEntry(method="GET", path="/invoices"),
+    )
+    decisions = decisions_from_config(_config_with(entry), None)
+
+    assert decisions["list_invoices"].exposed is True
+    assert decisions["list_invoices"].sensitivity is Sensitivity.SENSITIVE
+
+
+def test_diff_classifies_new_removed_changed_and_unchanged():
+    previous = decisions_from_config(
+        _config_with(
+            OperationEntry(
+                id="list_invoices",
+                upstream="billing",
+                description="d",
+                effect=Effect.READ_ONLY,
+                sensitivity=Sensitivity.NORMAL,
+                binding=BindingEntry(method="GET", path="/invoices"),
+            ),
+            OperationEntry(
+                id="cancel_invoice",
+                upstream="billing",
+                description="d",
+                effect=Effect.ACTION,
+                sensitivity=Sensitivity.NORMAL,
+                binding=BindingEntry(method="POST", path="/invoices/cancel"),
+            ),
+        ),
+        None,
+    )
+    current = [
+        _op("list_invoices", path="/invoices"),  # unchanged
+        _op("cancel_invoice", path="/invoices/cancel/v2"),  # binding changed
+        _op("get_invoice", path="/invoices/{id}"),  # new
+    ]
+
+    report = diff_operation_ids(previous, current)
+
+    assert report.new == ("get_invoice",)
+    assert report.changed == ("cancel_invoice",)
+    assert report.unchanged == ("list_invoices",)
+    assert report.removed == ()  # every previous id is present in current
+
+
+def test_removed_operations_are_reported_never_silently_dropped():
+    previous = decisions_from_config(
+        _config_with(
+            OperationEntry(
+                id="get_invoice_audit",
+                upstream="billing",
+                description="d",
+                effect=Effect.READ_ONLY,
+                sensitivity=Sensitivity.NORMAL,
+                binding=BindingEntry(method="GET", path="/invoices/{id}/audit"),
+            )
+        ),
+        None,
+    )
+    report = diff_operation_ids(previous, [])
+    assert report.removed == ("get_invoice_audit",)
+
+
+def test_run_reconcile_only_surveys_new_and_changed_operations():
+    previous = decisions_from_config(
+        _config_with(
+            OperationEntry(
+                id="list_invoices",
+                upstream="billing",
+                description="d",
+                effect=Effect.READ_ONLY,
+                sensitivity=Sensitivity.NORMAL,
+                binding=BindingEntry(method="GET", path="/invoices"),
+            )
+        ),
+        None,
+    )
+    current = [
+        _op("list_invoices", path="/invoices"),  # unchanged: no prompt needed
+        _op("get_invoice", path="/invoices/{id}"),  # new: one group-level prompt
+    ]
+    # Only one confirm scripted: if the unchanged operation were re-surveyed
+    # this would run out of script and fall back to the default, masking
+    # the bug, so also assert the unchanged decision equals the recorded one.
+    prompter = ScriptedPrompter(confirms=[True], texts=[])
+
+    result, report = run_reconcile(current, previous, prompter)
+
+    by_id = {d.operation.id: d for d in result.decisions}
+    assert by_id["list_invoices"] == previous["list_invoices"]
+    assert by_id["get_invoice"].exposed is True
+    assert report.unchanged == ("list_invoices",)
+    assert report.new == ("get_invoice",)
