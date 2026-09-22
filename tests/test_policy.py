@@ -131,13 +131,24 @@ def test_requirements_accumulate_across_every_matching_rule():
     assert decision.allowed is True
 
 
-def test_carry_is_true_when_any_matching_rule_sets_it():
+def test_carry_is_the_accumulated_required_details_of_every_carrying_rule():
     cfg = PolicyConfig.model_validate(
-        {"version": "1", "rules": [{"match": {"tags": ["billing"]}, "outbound": {"carry": True}}]}
+        {
+            "version": "1",
+            "rules": [
+                {
+                    "match": {"tags": ["billing"]},
+                    "require": {"authorization_details": [{"type": "payment_initiation"}]},
+                    "outbound": {"carry": True},
+                }
+            ],
+        }
     )
-    decision = PolicyEngine(cfg).evaluate(op(), principal())
+    decision = PolicyEngine(cfg).evaluate(
+        op(), principal(AuthorizationDetail(type="payment_initiation"))
+    )
     assert decision.allowed is True
-    assert decision.carry is True
+    assert decision.carry == (AuthorizationDetail(type="payment_initiation"),)
 
 
 def test_a_carry_only_rule_does_not_count_as_matched_under_unmatched_deny():
@@ -161,7 +172,7 @@ def test_a_carry_only_rule_does_not_count_as_matched_under_unmatched_deny():
     assert decision.allowed is False
 
 
-def test_carry_is_false_when_no_matching_rule_sets_it():
+def test_carry_is_empty_when_no_matching_rule_sets_it():
     cfg = PolicyConfig.model_validate({"version": "1", "rules": [PAYMENT_RULE]})
     presented = AuthorizationDetail(
         type="payment_initiation",
@@ -169,7 +180,43 @@ def test_carry_is_false_when_no_matching_rule_sets_it():
         locations=("https://api.example.com/v1/payments",),
     )
     decision = PolicyEngine(cfg).evaluate(op(), principal(presented))
-    assert decision.carry is False
+    assert decision.carry == ()
+
+
+def test_a_carry_only_rule_carries_nothing_since_it_has_no_require():
+    cfg = PolicyConfig.model_validate(
+        {"version": "1", "rules": [{"match": {"tags": ["billing"]}, "outbound": {"carry": True}}]}
+    )
+    decision = PolicyEngine(cfg).evaluate(op(), principal())
+    assert decision.allowed is True
+    assert decision.carry == ()
+
+
+def test_carry_only_includes_details_from_rules_whose_own_outbound_carry_is_true():
+    cfg = PolicyConfig.model_validate(
+        {
+            "version": "1",
+            "rules": [
+                PAYMENT_RULE,  # carry defaults to False
+                {
+                    "match": {"tags": ["billing"]},
+                    "require": {"authorization_details": [{"type": "audit_log"}]},
+                    "outbound": {"carry": True},
+                },
+            ],
+        }
+    )
+    presented = (
+        AuthorizationDetail(
+            type="payment_initiation",
+            actions=("initiate",),
+            locations=("https://api.example.com/v1/payments",),
+        ),
+        AuthorizationDetail(type="audit_log"),
+    )
+    decision = PolicyEngine(cfg).evaluate(op(), principal(*presented))
+    assert decision.allowed is True
+    assert decision.carry == (AuthorizationDetail(type="audit_log"),)
 
 
 def test_match_on_sensitivity():

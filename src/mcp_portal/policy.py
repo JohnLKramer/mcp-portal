@@ -22,7 +22,7 @@ from mcp_portal.operations import Operation
 class PolicyDecision:
     allowed: bool
     missing: tuple[AuthorizationDetail, ...] = ()
-    carry: bool = False
+    carry: tuple[AuthorizationDetail, ...] = ()
 
 
 def _matches(op: Operation, spec: PolicyMatchSpec) -> bool:
@@ -41,32 +41,34 @@ def _matching_rules(op: Operation, rules: Sequence[PolicyRule]) -> list[PolicyRu
     return [rule for rule in rules if _matches(op, rule.match)]
 
 
+def _accumulated_details(rules: Sequence[PolicyRule]) -> tuple[AuthorizationDetail, ...]:
+    result: list[AuthorizationDetail] = []
+    for rule in rules:
+        if rule.require is None:
+            continue
+        result.extend(
+            AuthorizationDetail(
+                type=d.type,
+                actions=tuple(d.actions or ()),
+                locations=tuple(d.locations or ()),
+                datatypes=tuple(d.datatypes or ()),
+                identifier=d.identifier,
+                privileges=tuple(d.privileges or ()),
+            )
+            for d in rule.require.authorization_details
+        )
+    return tuple(result)
+
+
 class PolicyEngine:
     def __init__(self, policy: PolicyConfig) -> None:
         self._policy = policy
 
     def evaluate(self, operation: Operation, principal: Principal) -> PolicyDecision:
         matching = _matching_rules(operation, self._policy.rules)
-        carry = any(rule.outbound.carry for rule in matching)
 
-        # "Matched" means "contributed a requirement" (§5) — a carry-only
-        # rule's match still sets `carry` above, but never makes an operation
-        # matched for the purposes of `defaults.unmatched`.
-        required: list[AuthorizationDetail] = []
-        for rule in matching:
-            if rule.require is None:
-                continue
-            required.extend(
-                AuthorizationDetail(
-                    type=d.type,
-                    actions=tuple(d.actions or ()),
-                    locations=tuple(d.locations or ()),
-                    datatypes=tuple(d.datatypes or ()),
-                    identifier=d.identifier,
-                    privileges=tuple(d.privileges or ()),
-                )
-                for d in rule.require.authorization_details
-            )
+        required = _accumulated_details(matching)
+        carry = _accumulated_details([r for r in matching if r.outbound.carry])
 
         if not required:
             allowed = self._policy.defaults.unmatched == "allow"
