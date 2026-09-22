@@ -1,7 +1,6 @@
-"""Docker integration test: RAR policy allow/deny against a live backend.
-Proves P3's enforcement — `tests/test_p3_end_to_end.py` already proves the
-same shape purely in-process; this proves it reaches a real HTTP call (or
-is stopped before one, for the denied case).
+"""Docker integration test: outbound.mode: client_credentials against a real
+mock-oauth2-server IdP, with the billing mock genuinely verifying the
+issued bearer token. Proves P4a's dynamic outbound mode over Docker.
 """
 
 import shutil
@@ -19,7 +18,7 @@ from mcp_portal.config.loader import load_config
 pytestmark = pytest.mark.integration
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-FIXTURES = Path(__file__).resolve().parent / "fixtures"
+STACK_CONFIG = Path(__file__).resolve().parent / "fixtures" / "stack-oauth.yaml"
 MOCK_HEALTH_URLS = (
     "http://localhost:8081/healthz",
     "http://localhost:8083/default/.well-known/openid-configuration",
@@ -64,43 +63,13 @@ def _client_secret(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.anyio
-async def test_the_policy_gated_operation_is_denied_without_the_required_detail(
-    mock_stack: None,
-):
-    app = build_app(load_config(FIXTURES / "stack-policy-denied.yaml"))
-    try:
-        result = await app.invoker.call(
-            "billing_get_customer_tax_id", {"customer_id": "cust_1"}
-        )
-        assert result.is_error is True
-        assert "customer_data" in result.content[0].text
-    finally:
-        await app.aclose()
-
-
-@pytest.mark.anyio
-async def test_an_unmatched_operation_is_allowed_under_the_same_policy(mock_stack: None):
-    app = build_app(load_config(FIXTURES / "stack-policy-denied.yaml"))
+async def test_list_invoices_via_a_real_client_credentials_round_trip(mock_stack: None):
+    app = build_app(load_config(STACK_CONFIG))
     try:
         result = await app.invoker.call(
             "billing_list_invoices", {"customer_id": "cust_1"}
         )
         assert result.is_error is False
         assert "inv_1" in result.content[0].text
-    finally:
-        await app.aclose()
-
-
-@pytest.mark.anyio
-async def test_the_policy_gated_operation_is_allowed_with_the_required_detail(
-    mock_stack: None,
-):
-    app = build_app(load_config(FIXTURES / "stack-policy-authorized.yaml"))
-    try:
-        result = await app.invoker.call(
-            "billing_get_customer_tax_id", {"customer_id": "cust_1"}
-        )
-        assert result.is_error is False
-        assert "TAX-CUST-1" in result.content[0].text
     finally:
         await app.aclose()

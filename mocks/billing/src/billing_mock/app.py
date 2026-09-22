@@ -1,8 +1,37 @@
 """In-memory mock of the billing API described by examples/billing.yaml."""
 
+import os
+
+import jwt
 from flask import Flask, jsonify, request
 
 app = Flask(__name__)
+
+_OAUTH_ISSUER = os.environ.get("MOCK_OAUTH2_ISSUER", "http://mock-oauth2-server:8080/default")
+_jwks_client = jwt.PyJWKClient(f"{_OAUTH_ISSUER}/jwks")
+
+
+@app.before_request
+def _require_bearer_token():
+    if request.path in ("/healthz", "/openapi.json"):
+        return None
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        return jsonify(error="missing bearer token"), 401
+    token = auth_header.removeprefix("Bearer ")
+    try:
+        signing_key = _jwks_client.get_signing_key_from_jwt(token)
+        jwt.decode(
+            token,
+            signing_key.key,
+            algorithms=["RS256"],
+            audience="billing-mock",
+            issuer=_OAUTH_ISSUER,
+        )
+    except jwt.InvalidTokenError:
+        return jsonify(error="invalid bearer token"), 401
+    return None
+
 
 _INVOICES: dict[str, list[dict[str, object]]] = {
     "cust_1": [

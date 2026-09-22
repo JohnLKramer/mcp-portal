@@ -10,6 +10,8 @@ requires-python = ">=3.14.7"
 dependencies = [
     "flask>=3.1,<4",
     "gunicorn>=23,<24",
+    "pyjwt[crypto]>=2.14,<3",
+    "httpx>=0.28",
 ]
 
 [dependency-groups]

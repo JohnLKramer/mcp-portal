@@ -2,7 +2,7 @@ version: "1"
 mode: configured
 
 server:
-  name: integration-portal-policy
+  name: integration-portal-oauth
   transport: stdio
 
 upstreams:
@@ -15,14 +15,6 @@ upstreams:
         token_endpoint: http://localhost:8083/default/token
         client_id: billing-client
         client_secret: ${env:MOCK_OAUTH2_CLIENT_SECRET}
-
-policy:
-  file: ./policy.yaml
-
-auth:
-  local_principal:
-    authorization_details:
-      - type: customer_data
 
 naming:
   strategy: operation_id
@@ -38,15 +30,4 @@ operations:
       path: /v1/invoices
       parameters:
         - { arg: customer_id, in: query, wire_name: customerId, required: true,
-            schema: { type: string } }
-
-  - id: get_customer_tax_id
-    upstream: billing
-    description: Get a customer's tax identifier.
-    group_tags: [billing]
-    binding:
-      method: GET
-      path: /v1/customers/{id}/tax-id
-      parameters:
-        - { arg: customer_id, in: path, wire_name: id, required: true,
             schema: { type: string } }
