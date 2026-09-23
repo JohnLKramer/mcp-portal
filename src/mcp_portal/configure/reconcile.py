@@ -66,7 +66,11 @@ def decisions_from_config(
         operation = Operation(
             id=entry.id,
             upstream=entry.upstream,
-            name=entry.name or entry.id,
+            # `""` means "generate a name", which is what an entry with no
+            # explicit `name` asked for. Falling back to `entry.id` here
+            # would let a reconcile pass pin the id as an explicit tool name
+            # and quietly override `naming.strategy`.
+            name=entry.name or "",
             title=entry.title or entry.description,
             description=entry.description,
             group_tags=tuple(entry.group_tags),
@@ -74,7 +78,7 @@ def decisions_from_config(
             sensitivity=entry.sensitivity or Sensitivity.NORMAL,
             input_schema={},
             binding=HttpBinding(
-                method=binding.method, path=binding.path, parameters=parameters, body=body
+                method=binding.method.upper(), path=binding.path, parameters=parameters, body=body
             ),
         )
         decisions[entry.id] = OperationDecision(
@@ -106,8 +110,13 @@ def _binding_key(binding: object) -> tuple[object, ...]:
     return (
         binding.method,
         binding.path,
-        tuple((p.arg, p.location, p.wire_name, p.required) for p in binding.parameters),
-        binding.body.schema if binding.body else None,
+        tuple(
+            (p.arg, p.location, p.wire_name, p.required, p.schema, p.style, p.explode)
+            for p in binding.parameters
+        ),
+        (binding.body.content_type, binding.body.mode, binding.body.schema)
+        if binding.body
+        else None,
     )
 
 

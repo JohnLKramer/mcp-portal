@@ -217,3 +217,91 @@ def test_decisions_from_config_reconstructs_require_from_a_tag_matched_policy_ru
     assert decisions["create_invoice"].require is not None
     assert decisions["create_invoice"].require.type == "payment_initiation"
     assert decisions["create_invoice"].require.actions == ("initiate",)
+
+
+def test_a_parameter_schema_change_is_classified_as_changed():
+    """A type change is exactly the kind of drift re-confirmation exists for:
+    the pinned schema is what the model is shown, so a stale one is a silent
+    contract mismatch rather than a loud failure."""
+    from mcp_portal.config.models import ParameterEntry
+    from mcp_portal.operations import Parameter, ParamLocation
+
+    entry = OperationEntry(
+        id="get_invoice",
+        upstream="billing",
+        description="Get an invoice.",
+        binding=BindingEntry(
+            method="GET",
+            path="/invoices/{id}",
+            parameters=[
+                ParameterEntry(
+                    arg="id", location=ParamLocation.PATH, required=True, schema={"type": "string"}
+                )
+            ],
+        ),
+    )
+    previous = decisions_from_config(_config_with(entry), None)
+
+    current = Operation(
+        id="get_invoice",
+        upstream="billing",
+        name="get_invoice",
+        title="get_invoice",
+        description="Get an invoice.",
+        group_tags=("billing",),
+        effect=Effect.READ_ONLY,
+        sensitivity=Sensitivity.NORMAL,
+        input_schema={},
+        binding=HttpBinding(
+            method="GET",
+            path="/invoices/{id}",
+            parameters=(
+                Parameter(
+                    arg="id",
+                    location=ParamLocation.PATH,
+                    wire_name="id",
+                    required=True,
+                    schema={"type": "integer"},
+                ),
+            ),
+        ),
+    )
+
+    assert diff_operation_ids(previous, [current]).changed == ("get_invoice",)
+
+
+def test_a_request_body_content_type_change_is_classified_as_changed():
+    from mcp_portal.config.models import BodyEntry
+    from mcp_portal.operations import BodySpec
+
+    schema = {"type": "object", "properties": {"amount": {"type": "integer"}}}
+    entry = OperationEntry(
+        id="create_invoice",
+        upstream="billing",
+        description="Create an invoice.",
+        binding=BindingEntry(
+            method="POST",
+            path="/invoices",
+            body=BodyEntry(content_type="application/json", schema=schema),
+        ),
+    )
+    previous = decisions_from_config(_config_with(entry), None)
+
+    current = Operation(
+        id="create_invoice",
+        upstream="billing",
+        name="create_invoice",
+        title="create_invoice",
+        description="Create an invoice.",
+        group_tags=("billing",),
+        effect=Effect.ACTION,
+        sensitivity=Sensitivity.NORMAL,
+        input_schema={},
+        binding=HttpBinding(
+            method="POST",
+            path="/invoices",
+            body=BodySpec(content_type="application/x-www-form-urlencoded", schema=schema),
+        ),
+    )
+
+    assert diff_operation_ids(previous, [current]).changed == ("create_invoice",)

@@ -99,19 +99,36 @@ def _run_configure(config_path: Path, policy_path: Path | None) -> int:
     else:
         result = run_survey(operations, prompter)
 
-    rendered_config = render_config(
+    # Start from a full dump of the loaded config rather than rebuilding it
+    # from the decisions: everything `configure` doesn't know how to touch
+    # (outbound credentials, timeouts, selection, naming, classification,
+    # inbound auth, HTTP bind settings) has to survive the write untouched.
+    operations_rendered = render_config(
         result.decisions,
         server_name=loaded.config.server.name,
         upstream_base_urls=base_urls,
-        mode=loaded.config.mode,
-    )
+        mode="configured",
+    )["operations"]
+
+    rendered_config = loaded.config.model_dump(mode="json", by_alias=True, exclude_none=True)
+    # The survey's exposure decisions are only authoritative under
+    # 'configured'; every introspect-* mode re-discovers and re-merges,
+    # which would serve a declined operation anyway.
+    rendered_config["mode"] = "configured"
+    rendered_config["operations"] = operations_rendered
     rendered_config["policy"] = {"file": str(policy_path)}
-    for key, upstream in loaded.config.upstreams.items():
-        if upstream.introspection is not None and key in rendered_config["upstreams"]:
-            rendered_config["upstreams"][key]["introspection"] = upstream.introspection.model_dump(
-                exclude_none=True
+    for key, url in base_urls.items():
+        if key in rendered_config["upstreams"] and url:
+            # Re-dumped from the model rather than assigned into the existing
+            # dict so a base_url that was absent before lands in declared
+            # field order, keeping a later no-op run a genuine no-op.
+            rendered_config["upstreams"][key] = (
+                loaded.config.upstreams[key]
+                .model_copy(update={"base_url": url})
+                .model_dump(mode="json", by_alias=True, exclude_none=True)
             )
-    rendered_policy = render_policy(result.decisions)
+
+    rendered_policy = render_policy(result.decisions, existing_policy=loaded.policy)
 
     if not write_with_confirmation(policy_path, rendered_policy, prompter):
         print("policy not written.")

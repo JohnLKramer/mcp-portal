@@ -85,3 +85,28 @@ def test_defaults_prefill_exposed_and_require_for_a_reconciled_operation():
     decision = result.decisions[0]
     assert decision.exposed is True
     assert decision.require == previous.require
+
+
+def test_declining_exposure_keeps_the_previous_decisions_sensitivity():
+    """A re-survey's default carries the operator's earlier "this is
+    sensitive" call. Declining to expose must not quietly reset the recorded
+    sensitivity to the introspected default — that is a downgrade in the
+    fail-open direction."""
+    from mcp_portal.configure.decisions import OperationDecision
+
+    op = _op("cancel_invoice", tags=("billing",), method="DELETE")
+    previous = OperationDecision(
+        operation=op,
+        exposed=True,
+        effect=op.effect,
+        sensitivity=Sensitivity.SENSITIVE,
+        require=None,
+    )
+    # Group-level "no", then per-operation "expose cancel_invoice?" -> no.
+    prompter = ScriptedPrompter(confirms=[False, False], texts=[])
+
+    result = run_survey([op], prompter, defaults={"cancel_invoice": previous})
+
+    decision = result.decisions[0]
+    assert decision.exposed is False
+    assert decision.sensitivity is Sensitivity.SENSITIVE

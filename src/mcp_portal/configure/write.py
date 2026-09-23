@@ -12,6 +12,7 @@ from typing import Any
 
 from ruamel.yaml import YAML
 
+from mcp_portal.config.policy import PolicyConfig, PolicyRule
 from mcp_portal.configure.decisions import OperationDecision
 from mcp_portal.configure.interaction import Prompter
 from mcp_portal.operations import HttpBinding
@@ -27,11 +28,17 @@ def render_config(
     mode: str = "configured",
 ) -> dict[str, Any]:
     operations: list[dict[str, Any]] = []
-    for decision in decisions:
+    # Sorted by id so a no-op second `configure` run produces no diff: the
+    # survey and reconcile pipelines hand back different orderings (tag-sorted
+    # vs unchanged-then-surveyed) for the same set of decisions.
+    for decision in sorted(decisions, key=lambda d: d.operation.id):
         if not decision.exposed:
             continue
         op = decision.operation
-        assert isinstance(op.binding, HttpBinding)
+        if not isinstance(op.binding, HttpBinding):
+            raise TypeError(
+                f"operation {op.id!r} has a non-HTTP binding, which configure cannot render yet"
+            )
         parameters = [
             {
                 "arg": p.arg,
@@ -55,18 +62,19 @@ def render_config(
                 "mode": op.binding.body.mode.value,
                 "schema": dict(op.binding.body.schema),
             }
-        operations.append(
-            {
-                "id": op.id,
-                "upstream": op.upstream,
-                "description": op.description,
-                "title": op.title,
-                "group_tags": list(op.group_tags),
-                "effect": decision.effect.value,
-                "sensitivity": decision.sensitivity.value,
-                "binding": binding_dict,
-            }
-        )
+        entry: dict[str, Any] = {
+            "id": op.id,
+            "upstream": op.upstream,
+            "description": op.description,
+            "title": op.title,
+            "group_tags": list(op.group_tags),
+            "effect": decision.effect.value,
+            "sensitivity": decision.sensitivity.value,
+            "binding": binding_dict,
+        }
+        if op.name:
+            entry["name"] = op.name
+        operations.append(entry)
     return {
         "version": "1",
         "mode": mode,
@@ -76,12 +84,45 @@ def render_config(
     }
 
 
-def render_policy(decisions: Sequence[OperationDecision]) -> dict[str, Any]:
-    rules: list[dict[str, Any]] = []
+def render_policy(
+    decisions: Sequence[OperationDecision],
+    existing_policy: PolicyConfig | None = None,
+) -> dict[str, Any]:
+    """Render the policy file, preserving every hand-authored rule untouched.
+
+    A rule is "configure-owned" — and therefore safe to regenerate — only
+    when its `match` is an exact single-id match (`ids=[op_id]`, nothing
+    else) for an operation `configure` is currently managing. Every other
+    rule (tag/upstream/effect/sensitivity-matched, multi-id, or matching an
+    id `configure` doesn't know about) is preserved verbatim: this is the
+    only way to keep the module-level invariant in `config/policy.py`
+    ("authorization policy must never be silently regenerated from a third
+    party's schema") true across a `configure` write.
+    """
+    decision_ids = {d.operation.id for d in decisions}
+
+    def _is_configure_owned(rule: PolicyRule) -> bool:
+        match = rule.match
+        return (
+            len(match.ids) == 1
+            and match.ids[0] in decision_ids
+            and not match.tags
+            and not match.upstream
+            and not match.effect
+            and not match.sensitivity
+        )
+
+    foreign_rules: list[dict[str, Any]] = []
+    if existing_policy is not None:
+        for rule in existing_policy.rules:
+            if not _is_configure_owned(rule):
+                foreign_rules.append(rule.model_dump(mode="json", by_alias=True, exclude_none=True))
+
+    owned_rules: list[dict[str, Any]] = []
     for decision in decisions:
         if not decision.exposed or decision.require is None:
             continue
-        rules.append(
+        owned_rules.append(
             {
                 "match": {"ids": [decision.operation.id]},
                 "require": {
@@ -98,7 +139,11 @@ def render_policy(decisions: Sequence[OperationDecision]) -> dict[str, Any]:
                 },
             }
         )
-    return {"version": "1", "rules": rules}
+
+    result: dict[str, Any] = {"version": "1", "rules": foreign_rules + owned_rules}
+    if existing_policy is not None:
+        result["defaults"] = {"unmatched": existing_policy.defaults.unmatched}
+    return result
 
 
 def _render_yaml(data: dict[str, Any]) -> str:

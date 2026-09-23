@@ -42,7 +42,10 @@ def _survey_one(
             operation=op,
             exposed=False,
             effect=op.effect,
-            sensitivity=op.sensitivity,
+            # The resolved default, not the raw introspected value: on a
+            # reconcile re-survey it carries the previous decision's
+            # sensitivity, and declining exposure must not downgrade it.
+            sensitivity=default.sensitivity,
             require=None,
         )
 
