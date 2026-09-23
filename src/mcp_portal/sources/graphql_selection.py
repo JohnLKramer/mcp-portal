@@ -47,7 +47,7 @@ def _fields_for(
 
         assert target.name is not None
         if target.name in path:
-            lines.append(f"{indent}{field.name}")
+            lines.append(f"{indent}{field.name} {{ __typename }}")
             continue  # stop at first re-occurrence, per the design's cycle rule
 
         nested = _fields_for(target.name, schema, type_policy, (*path, target.name), indent + "  ")
