@@ -4,11 +4,12 @@ mcp-portal is an MCP gateway for HTTP/OpenAPI backends. Instead of giving an
 LLM raw system or API access, it exposes specific, opted-in backend endpoints
 as structured MCP tools.
 
-**Status: P4.** OpenAPI introspection, opt-in exposure via `x-mcp-*`
+**Status: P5.** OpenAPI introspection, opt-in exposure via `x-mcp-*`
 extensions, RAR (RFC 9396) policy enforcement, outbound `client_credentials`
-and `token_exchange` auth, the streamable HTTP transport, and inbound OAuth
-(JWT validation, JWKS, RFC 9728 discovery) are implemented — servable over
-stdio or HTTP. Non-HTTP backends are not implemented — see
+and `token_exchange` auth, the streamable HTTP transport, inbound OAuth
+(JWT validation, JWKS, RFC 9728 discovery), and an interactive `configure`
+command for authoring and reconciling a config are implemented — servable
+over stdio or HTTP. Non-HTTP backends are not implemented — see
 [Roadmap](#roadmap) and the
 [design spec](docs/superpowers/specs/2026-09-19-mcp-sidekit-design.md).
 
@@ -69,6 +70,14 @@ then forwards it to the upstream over HTTP.
   for its own credential, carrying only the policy's required detail — never
   the caller's whole presented set — when a matching rule sets
   `outbound.carry: true`.
+- **Interactive `configure` command** — introspects an upstream and walks you
+  through a survey of which operations to expose, proposing sensible
+  defaults so you're confirming rather than answering from scratch. It shows
+  you the config and policy diff and only writes after you confirm. Run it
+  again after the upstream API changes and it reconciles instead of
+  re-asking everything: new operations get surveyed, removed ones are called
+  out instead of silently dropped, changed operations get re-confirmed, and
+  everything else is left exactly as it was.
 
 ## Quickstart
 
@@ -101,6 +110,27 @@ streamable-HTTP counterpart (inbound OAuth + outbound `token_exchange`), and
 [`schema/config-v1.schema.json`](schema/config-v1.schema.json)
 (generated from the Pydantic models via `uv run python -m mcp_portal.config.schema`)
 for the schema JSON and YAML configs are validated against.
+
+## Authoring a config interactively
+
+Instead of hand-writing `operations[]` and a policy file, point `configure`
+at an OpenAPI document and answer its prompts:
+
+```bash
+uv run mcp-portal configure --config my-service.yaml
+```
+
+`configure` introspects the upstream, then asks group by group whether to
+expose a set of operations — the default answer is yes, so you're
+confirming a proposal instead of typing an answer from scratch for every
+operation. Before writing anything, it shows you the diff to the config and
+to the policy file, and it only writes if you confirm.
+
+Run it again later, after the upstream API has changed, and it reconciles
+instead of re-asking everything: new operations get surveyed, operations the
+upstream removed are called out by name (never silently dropped), operations
+whose shape changed get re-confirmed, and everything else is left exactly as
+you last set it.
 
 ## Annotating backends
 
