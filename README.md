@@ -6,11 +6,11 @@ as structured MCP tools.
 
 **Status: P5.** OpenAPI introspection, opt-in exposure via `x-mcp-*`
 extensions, RAR (RFC 9396) policy enforcement, outbound `client_credentials`
-and `token_exchange` auth, the streamable HTTP transport, inbound OAuth
-(JWT validation, JWKS, RFC 9728 discovery), and an interactive `configure`
-command for authoring and reconciling a config are implemented — servable
-over stdio or HTTP. Non-HTTP backends are not implemented — see
-[Roadmap](#roadmap) and the
+and `token_exchange` auth, the streamable HTTP transport (with stateful
+sessions and SSE), inbound OAuth (JWT validation, JWKS, RFC 9728 discovery),
+and an interactive `configure` command for authoring and reconciling a
+config are implemented — servable over stdio or HTTP. Non-HTTP backends are
+not implemented — see [Roadmap](#roadmap) and the
 [design spec](docs/superpowers/specs/2026-09-19-mcp-sidekit-design.md).
 
 ## Key benefits
@@ -60,8 +60,11 @@ then forwards it to the upstream over HTTP.
   denylist blocks bindings that would let a model supply `Authorization`,
   `Host`, `Cookie`, or `X-Forwarded-*` headers.
 - **HTTP transport for the gateway itself** — `transport: http` serves over
-  the `mcp` SDK's streamable HTTP transport, with the Origin/Host
-  DNS-rebinding defense and RFC 9728 protected-resource metadata built in.
+  the `mcp` SDK's streamable HTTP transport: `Mcp-Session-Id` sessions and
+  `GET`/SSE streaming, the Origin/Host DNS-rebinding defense, and RFC 9728
+  protected-resource metadata are all built in. A session is bound to the
+  bearer principal that created it — a mismatched reuse is rejected, never
+  silently mixed.
 - **Inbound OAuth and outbound `client_credentials`/`token_exchange`** —
   under `transport: http`, `auth.inbound` validates the caller's own bearer
   JWT (RFC 9068, JWKS-backed) and evaluates RAR policy against its
