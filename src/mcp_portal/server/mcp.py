@@ -18,7 +18,8 @@ from mcp_portal.auth.principal import Principal
 from mcp_portal.operations import Effect, Operation
 from mcp_portal.policy import PolicyEngine
 from mcp_portal.registry import ToolSet
-from mcp_portal.transports.http import HttpTransport, RequestBuildError
+from mcp_portal.transports.base import TransportAdapter
+from mcp_portal.transports.http import RequestBuildError
 
 log = logging.getLogger("mcp_portal")
 
@@ -62,7 +63,7 @@ class ToolInvoker:
     def __init__(
         self,
         toolset: ToolSet,
-        transports: Mapping[str, HttpTransport],
+        transports: Mapping[str, TransportAdapter],
         policy: PolicyEngine,
         principal: Principal | None = None,
     ) -> None:

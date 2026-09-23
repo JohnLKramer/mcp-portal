@@ -8,7 +8,9 @@ import pytest
 
 from mcp_portal.app import build_app
 from mcp_portal.auth.outbound import ClientCredentialsSource
-from mcp_portal.config.loader import ConfigError, load_config
+from mcp_portal.config.loader import ConfigError, LoadedConfig, load_config
+from mcp_portal.config.models import Config
+from mcp_portal.operations import GraphQlBinding, HttpBinding
 
 FIXTURES = Path(__file__).parent / "fixtures" / "openapi"
 
@@ -458,3 +460,86 @@ def test_build_app_logs_a_dead_policy_rule_warning(
     with caplog.at_level(logging.WARNING, logger="mcp_portal"):
         build_app(load_config(_write_config(tmp_path, payload)))
     assert "nonexistent" in caplog.text
+
+
+_MIXED_CONFIG = {
+    "version": "1",
+    "mode": "configured",
+    "server": {"name": "test", "transport": "stdio"},
+    "upstreams": {"mixed": {"base_url": "https://api.example.com"}},
+    "operations": [
+        {
+            "id": "list_things",
+            "upstream": "mixed",
+            "description": "d",
+            "binding": {"method": "GET", "path": "/v1/things"},
+        },
+        {
+            "id": "get_user",
+            "upstream": "mixed",
+            "description": "d",
+            "binding": {
+                "protocol": "graphql",
+                "operation_type": "query",
+                "document": "query GetUser($id: ID!) { user(id: $id) { id } }",
+                "variables": [{"name": "id", "graphql_type": "ID!", "required": True}],
+            },
+        },
+    ],
+}
+
+
+@pytest.mark.anyio
+async def test_build_app_dispatches_by_binding_type_within_one_upstream(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    seen: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if request.url.path == "/v1/things":
+            return httpx.Response(200, json={"things": []})
+        return httpx.Response(200, json={"data": {"user": {"id": "1"}}})
+
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr(
+        httpx,
+        "AsyncClient",
+        lambda **kw: real_client(transport=httpx.MockTransport(handler), **kw),
+    )
+
+    config = Config.model_validate(_MIXED_CONFIG)
+    loaded = LoadedConfig(config=config, secrets={}, base_dir=None, policy=None)
+    app = build_app(loaded)
+    try:
+        http_op = next(
+            op for op in app.invoker._toolset.operations if isinstance(op.binding, HttpBinding)
+        )
+        graphql_op = next(
+            op for op in app.invoker._toolset.operations if isinstance(op.binding, GraphQlBinding)
+        )
+        # One transport object serves both operations' upstream key ("mixed"),
+        # confirming build_app didn't need a second map entry to hold both
+        # protocols for a single upstream.
+        assert app.invoker._transports.get(http_op.upstream) is app.invoker._transports.get(
+            graphql_op.upstream
+        )
+
+        http_result = await app.invoker.call(http_op.name, {})
+        graphql_result = await app.invoker.call(graphql_op.name, {"id": "1"})
+    finally:
+        await app.aclose()
+
+    assert http_result.is_error is False
+    assert graphql_result.is_error is False
+    assert len(seen) == 2
+    # The HTTP-bound call hit the REST path; the GraphQL-bound call posted a
+    # query document to the upstream root — proof the dispatcher actually
+    # routed each operation to the transport matching its binding type,
+    # rather than always falling through to one protocol.
+    things_request, graphql_request = seen
+    assert things_request.method == "GET"
+    assert things_request.url.path == "/v1/things"
+    graphql_body = json.loads(graphql_request.content)
+    assert "GetUser" in graphql_body["query"]
+    assert graphql_body["variables"] == {"id": "1"}
