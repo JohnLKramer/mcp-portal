@@ -101,6 +101,9 @@ def graphql():
         user = _USERS.get(user_id)
         if user is None:
             return jsonify(data=None, errors=[{"message": f"unknown user {user_id!r}"}])
-        return jsonify(data={"user": {"id": user["id"], "name": user["name"]}})
+        response_user = {"id": user["id"], "name": user["name"]}
+        if "ssn" in query:
+            response_user["ssn"] = user["ssn"]
+        return jsonify(data={"user": response_user})
 
     return jsonify(data=None, errors=[{"message": "unrecognized operation"}]), 400

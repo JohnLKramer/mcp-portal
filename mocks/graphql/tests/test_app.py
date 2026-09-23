@@ -21,6 +21,15 @@ def test_user_query_returns_a_known_user():
     assert resp.json["data"]["user"]["name"] == "Ada"
 
 
+def test_user_query_with_ssn_in_the_selection_returns_ssn():
+    client = app.test_client()
+    resp = client.post(
+        "/graphql",
+        json={"query": "query GetUser($id: ID!) { user(id: $id) { id name ssn } }", "variables": {"id": "u1"}},
+    )
+    assert resp.json["data"]["user"]["ssn"] == "000-00-0000"
+
+
 def test_user_query_for_an_unknown_id_returns_errors():
     client = app.test_client()
     resp = client.post(
