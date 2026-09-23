@@ -6,11 +6,13 @@ from mcp_portal.operations import (
     BodyMode,
     BodySpec,
     Effect,
+    GraphQlBinding,
     HttpBinding,
     Operation,
     Parameter,
     ParamLocation,
     Sensitivity,
+    Variable,
 )
 
 
@@ -76,3 +78,39 @@ def test_parameter_defaults_match_openapi_query_defaults():
     )
     assert param.style == "form"
     assert param.explode is True
+
+
+def make_graphql_binding(**overrides: object) -> GraphQlBinding:
+    defaults: dict[str, object] = {
+        "operation_type": "query",
+        "document": "query GetUser($id: ID!) { user(id: $id) { id name } }",
+        "variables": (Variable(name="id", graphql_type="ID!", required=True),),
+    }
+    return GraphQlBinding(**(defaults | overrides))  # type: ignore[arg-type]
+
+
+def test_graphql_binding_is_frozen_and_defaults_to_no_variables():
+    binding = GraphQlBinding(operation_type="mutation", document="mutation { noop }")
+    assert binding.protocol == "graphql"
+    assert binding.variables == ()
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        binding.document = "mutation { other }"  # type: ignore[misc]
+
+
+def test_operation_accepts_a_graphql_binding():
+    op = dataclasses.replace(
+        Operation(
+            id="get-user",
+            upstream="my-graphql-api",
+            name="get_user",
+            title="Get user",
+            description="Fetch a user by id",
+            group_tags=(),
+            effect=Effect.READ_ONLY,
+            sensitivity=Sensitivity.NORMAL,
+            input_schema={"type": "object", "properties": {}},
+            binding=make_binding(),
+        ),
+        binding=make_graphql_binding(),
+    )
+    assert isinstance(op.binding, GraphQlBinding)
