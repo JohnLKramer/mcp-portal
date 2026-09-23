@@ -97,6 +97,18 @@ def test_configure_does_not_leave_a_config_referencing_a_missing_policy_file(
     assert reloaded.config.operations == []
 
 
+def test_configure_preserves_the_introspection_pointer_across_a_write(tmp_path: Path, monkeypatch):
+    config_path = _new_config_yaml(tmp_path)
+    policy_path = tmp_path / "policy.yaml"
+
+    answers = iter([True, True, True])
+    monkeypatch.setattr("builtins.input", lambda *_args: "y" if next(answers) else "n")
+    assert main(["configure", "--config", str(config_path), "--policy", str(policy_path)]) == 0
+
+    reloaded = _load_yaml(config_path)
+    assert reloaded["upstreams"]["billing"]["introspection"]["openapi"]["file"]
+
+
 def _load_yaml(path: Path):
     from ruamel.yaml import YAML
 

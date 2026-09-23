@@ -106,6 +106,11 @@ def _run_configure(config_path: Path, policy_path: Path | None) -> int:
         mode=loaded.config.mode,
     )
     rendered_config["policy"] = {"file": str(policy_path)}
+    for key, upstream in loaded.config.upstreams.items():
+        if upstream.introspection is not None and key in rendered_config["upstreams"]:
+            rendered_config["upstreams"][key]["introspection"] = upstream.introspection.model_dump(
+                exclude_none=True
+            )
     rendered_policy = render_policy(result.decisions)
 
     if not write_with_confirmation(policy_path, rendered_policy, prompter):
