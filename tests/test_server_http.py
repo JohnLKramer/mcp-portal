@@ -235,10 +235,12 @@ async def test_a_valid_bearer_token_reaches_the_tool_call(
         principals=principals,
     ) as client:
         token = _bearer(rsa_key)
+        auth_headers = MCP_HEADERS | {"Authorization": f"Bearer {token}"}
+        session_id = await _initialize(client, auth_headers)
         response = await client.post(
             "/mcp",
             json=_rpc("tools/call", name="list_invoices", arguments={}),
-            headers=MCP_HEADERS | {"Authorization": f"Bearer {token}"},
+            headers=auth_headers | {"Mcp-Session-Id": session_id},
         )
 
     assert response.status_code == 200
@@ -268,10 +270,12 @@ async def test_a_host_header_matching_the_audience_is_not_rejected(
         tmp_path, monkeypatch, _config(auth=INBOUND), handler=_idp_handler(jwk)
     ) as client:
         token = _bearer(rsa_key)
+        headers = MCP_HEADERS | {"Authorization": f"Bearer {token}", "Host": "api.example.com"}
+        session_id = await _initialize(client, headers)
         response = await client.post(
             "/mcp",
             json=_rpc("tools/call", name="list_invoices", arguments={}),
-            headers=MCP_HEADERS | {"Authorization": f"Bearer {token}", "Host": "api.example.com"},
+            headers=headers | {"Mcp-Session-Id": session_id},
         )
 
     assert response.status_code != 421
@@ -288,10 +292,12 @@ async def test_localhost_is_accepted_under_the_default_loopback_bind(
     `Host: localhost:8443` on the wire. Deriving the allow-list from the bind
     address alone would 421 that on a fresh install."""
     async with _client_for(tmp_path, monkeypatch, _config(), handler=_idp_handler(jwk)) as client:
+        headers = MCP_HEADERS | {"Host": "localhost:8443"}
+        session_id = await _initialize(client, headers)
         response = await client.post(
             "/mcp",
             json=_rpc("tools/call", name="list_invoices", arguments={}),
-            headers=MCP_HEADERS | {"Host": "localhost:8443"},
+            headers=headers | {"Mcp-Session-Id": session_id},
         )
 
     assert response.status_code != 421
@@ -314,10 +320,12 @@ async def test_a_bracketed_ipv6_loopback_host_header_is_accepted(
         }
     )
     async with _client_for(tmp_path, monkeypatch, config, handler=_idp_handler(jwk)) as client:
+        headers = MCP_HEADERS | {"Host": "[::1]:8443"}
+        session_id = await _initialize(client, headers)
         response = await client.post(
             "/mcp",
             json=_rpc("tools/call", name="list_invoices", arguments={}),
-            headers=MCP_HEADERS | {"Host": "[::1]:8443"},
+            headers=headers | {"Mcp-Session-Id": session_id},
         )
 
     assert response.status_code != 421
@@ -347,10 +355,12 @@ async def test_a_configured_allowed_host_is_accepted_on_a_wildcard_bind(
         auth={"inbound": {"allow_unauthenticated_http": True}},
     )
     async with _client_for(tmp_path, monkeypatch, config, handler=_idp_handler(jwk)) as client:
+        headers = MCP_HEADERS | {"Host": "gateway.example.com"}
+        session_id = await _initialize(client, headers)
         response = await client.post(
             "/mcp",
             json=_rpc("tools/call", name="list_invoices", arguments={}),
-            headers=MCP_HEADERS | {"Host": "gateway.example.com"},
+            headers=headers | {"Mcp-Session-Id": session_id},
         )
 
     assert response.status_code != 421
@@ -370,10 +380,11 @@ async def test_inbound_disabled_on_loopback_uses_the_local_principal(
         handler=_idp_handler(jwk),
         principals=principals,
     ) as client:
+        session_id = await _initialize(client, MCP_HEADERS)
         response = await client.post(
             "/mcp",
             json=_rpc("tools/call", name="list_invoices", arguments={}),
-            headers=MCP_HEADERS,
+            headers=MCP_HEADERS | {"Mcp-Session-Id": session_id},
         )
 
     assert response.status_code == 200
