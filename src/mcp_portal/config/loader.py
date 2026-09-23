@@ -15,7 +15,7 @@ from typing import Any
 from pydantic import ValidationError
 from ruamel.yaml import YAML
 
-from mcp_portal.config.models import SECRET_REF_PATTERN, Config, PolicyFileConfig
+from mcp_portal.config.models import SECRET_REF_PATTERN, Config, HttpBindingEntry, PolicyFileConfig
 from mcp_portal.config.policy import PolicyConfig
 from mcp_portal.operations import HttpBinding, Operation, ParamLocation
 
@@ -96,7 +96,10 @@ def check_header_denylist(config: Config) -> None:
         if u.auth.outbound.mode != "none"
     )
     for op in config.operations:
-        for param in op.binding.parameters:
+        binding = op.binding
+        if not isinstance(binding, HttpBindingEntry):
+            continue
+        for param in binding.parameters:
             if param.location is not ParamLocation.HEADER:
                 continue
             header = param.wire_name or param.arg

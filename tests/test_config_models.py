@@ -1,7 +1,13 @@
 import pytest
 from pydantic import ValidationError
 
-from mcp_portal.config.models import AuthConfig, Config, OutboundConfig, ServerConfig
+from mcp_portal.config.models import (
+    AuthConfig,
+    Config,
+    IntrospectionConfig,
+    OutboundConfig,
+    ServerConfig,
+)
 
 MINIMAL: dict = {
     "version": "1",
@@ -384,6 +390,63 @@ def test_token_exchange_with_inbound_disabled_over_http_is_a_startup_error():
                 },
             }
         },
+    }
+    with pytest.raises(ValidationError):
+        Config.model_validate(payload)
+
+
+def test_introspection_requires_exactly_one_of_openapi_or_graphql():
+    with pytest.raises(ValidationError):
+        IntrospectionConfig.model_validate({})
+    with pytest.raises(ValidationError):
+        IntrospectionConfig.model_validate(
+            {
+                "openapi": {"url": "https://api.example.com/openapi.json"},
+                "graphql": {"url": "https://api.example.com/graphql"},
+            }
+        )
+    cfg = IntrospectionConfig.model_validate(
+        {"graphql": {"url": "https://api.example.com/graphql"}}
+    )
+    assert cfg.graphql is not None
+    assert cfg.graphql.type_policy == {}
+
+
+def test_graphql_binding_entry_validates():
+    payload = MINIMAL | {
+        "upstreams": {
+            "gql": {
+                "base_url": "https://api.example.com",
+            }
+        },
+        "operations": [
+            {
+                "id": "get_user",
+                "upstream": "gql",
+                "description": "Fetch a user by id.",
+                "binding": {
+                    "protocol": "graphql",
+                    "operation_type": "query",
+                    "document": "query GetUser($id: ID!) { user(id: $id) { id name } }",
+                    "variables": [{"name": "id", "graphql_type": "ID!", "required": True}],
+                },
+            }
+        ],
+    }
+    cfg = Config.model_validate(payload)
+    assert cfg.operations[0].binding.protocol == "graphql"
+
+
+def test_binding_entry_rejects_an_unknown_protocol():
+    payload = MINIMAL | {
+        "operations": [
+            {
+                "id": "x",
+                "upstream": "billing",
+                "description": "d",
+                "binding": {"protocol": "grpc", "method": "GET", "path": "/x"},
+            }
+        ]
     }
     with pytest.raises(ValidationError):
         Config.model_validate(payload)

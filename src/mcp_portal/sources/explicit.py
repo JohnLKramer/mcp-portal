@@ -11,7 +11,7 @@ from collections.abc import Iterable
 
 from mcp_portal.classify import UnsupportedMethod, effect_for_method
 from mcp_portal.config.loader import ConfigError
-from mcp_portal.config.models import BindingEntry, Config, OperationEntry
+from mcp_portal.config.models import Config, HttpBindingEntry, OperationEntry
 from mcp_portal.operations import (
     BodySpec,
     HttpBinding,
@@ -30,7 +30,7 @@ from mcp_portal.sources.flatten import (
 log = logging.getLogger("mcp_portal")
 
 
-def _binding(entry: BindingEntry) -> HttpBinding:
+def _binding(entry: HttpBindingEntry) -> HttpBinding:
     return HttpBinding(
         method=entry.method.upper(),
         path=entry.path,
@@ -69,6 +69,14 @@ class ExplicitSource:
                 yield op
 
     def _build(self, entry: OperationEntry) -> Operation | None:
+        # ExplicitSource only handles HTTP bindings until Task 7 adds the
+        # GraphQL branch; this narrows the type for mypy without adding any
+        # GraphQL behavior here.
+        if not isinstance(entry.binding, HttpBindingEntry):
+            raise ConfigError(
+                f"operation {entry.id!r}: binding protocol {entry.binding.protocol!r} "
+                "is not yet supported by ExplicitSource"
+            )
         binding = _binding(entry.binding)
 
         try:

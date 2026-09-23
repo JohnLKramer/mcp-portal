@@ -1,6 +1,6 @@
 from mcp_portal.config.models import (
-    BindingEntry,
     Config,
+    HttpBindingEntry,
     OperationEntry,
     ServerConfig,
     UpstreamConfig,
@@ -44,7 +44,7 @@ def test_decisions_from_config_reconstructs_exposure_effect_and_sensitivity():
         description="List invoices.",
         effect=Effect.READ_ONLY,
         sensitivity=Sensitivity.SENSITIVE,
-        binding=BindingEntry(method="GET", path="/invoices"),
+        binding=HttpBindingEntry(method="GET", path="/invoices"),
     )
     decisions = decisions_from_config(_config_with(entry), None)
 
@@ -61,7 +61,7 @@ def test_diff_classifies_new_removed_changed_and_unchanged():
                 description="d",
                 effect=Effect.READ_ONLY,
                 sensitivity=Sensitivity.NORMAL,
-                binding=BindingEntry(method="GET", path="/invoices"),
+                binding=HttpBindingEntry(method="GET", path="/invoices"),
             ),
             OperationEntry(
                 id="cancel_invoice",
@@ -69,7 +69,7 @@ def test_diff_classifies_new_removed_changed_and_unchanged():
                 description="d",
                 effect=Effect.ACTION,
                 sensitivity=Sensitivity.NORMAL,
-                binding=BindingEntry(method="POST", path="/invoices/cancel"),
+                binding=HttpBindingEntry(method="POST", path="/invoices/cancel"),
             ),
         ),
         None,
@@ -97,7 +97,7 @@ def test_removed_operations_are_reported_never_silently_dropped():
                 description="d",
                 effect=Effect.READ_ONLY,
                 sensitivity=Sensitivity.NORMAL,
-                binding=BindingEntry(method="GET", path="/invoices/{id}/audit"),
+                binding=HttpBindingEntry(method="GET", path="/invoices/{id}/audit"),
             )
         ),
         None,
@@ -115,7 +115,7 @@ def test_run_reconcile_only_surveys_new_and_changed_operations():
                 description="d",
                 effect=Effect.READ_ONLY,
                 sensitivity=Sensitivity.NORMAL,
-                binding=BindingEntry(method="GET", path="/invoices"),
+                binding=HttpBindingEntry(method="GET", path="/invoices"),
             )
         ),
         None,
@@ -145,7 +145,7 @@ def test_decisions_from_config_preserves_parameters_and_body_for_unchanged_detec
         description="d",
         effect=Effect.ACTION,
         sensitivity=Sensitivity.NORMAL,
-        binding=BindingEntry(
+        binding=HttpBindingEntry(
             method="POST",
             path="/invoices",
             body={"schema": {"type": "object", "properties": {"amount": {"type": "integer"}}}},
@@ -195,7 +195,7 @@ def test_decisions_from_config_reconstructs_require_from_a_tag_matched_policy_ru
         effect=Effect.ACTION,
         sensitivity=Sensitivity.NORMAL,
         group_tags=["billing"],
-        binding=BindingEntry(method="POST", path="/invoices"),
+        binding=HttpBindingEntry(method="POST", path="/invoices"),
     )
     policy = PolicyConfig(
         version="1",
@@ -230,7 +230,7 @@ def test_a_parameter_schema_change_is_classified_as_changed():
         id="get_invoice",
         upstream="billing",
         description="Get an invoice.",
-        binding=BindingEntry(
+        binding=HttpBindingEntry(
             method="GET",
             path="/invoices/{id}",
             parameters=[
@@ -279,7 +279,7 @@ def test_a_request_body_content_type_change_is_classified_as_changed():
         id="create_invoice",
         upstream="billing",
         description="Create an invoice.",
-        binding=BindingEntry(
+        binding=HttpBindingEntry(
             method="POST",
             path="/invoices",
             body=BodyEntry(content_type="application/json", schema=schema),
