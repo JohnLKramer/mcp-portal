@@ -4,7 +4,7 @@ import pytest
 
 from mcp_portal.config.loader import ConfigError
 from mcp_portal.config.models import Config
-from mcp_portal.operations import Effect, Sensitivity
+from mcp_portal.operations import Effect, GraphQlBinding, Sensitivity
 from mcp_portal.sources.explicit import ExplicitSource
 
 BASE: dict = {
@@ -304,3 +304,42 @@ def test_a_single_arg_body_keeps_its_constraints_and_does_not_warn(caplog):
         (op,) = build([payload])
     assert caplog.text == ""
     assert "oneOf" in op.input_schema["properties"]["body"]
+
+
+_GRAPHQL_CONFIG = {
+    "version": "1",
+    "mode": "configured",
+    "server": {"name": "test", "transport": "stdio"},
+    "upstreams": {"gql": {"base_url": "https://api.example.com"}},
+    "operations": [
+        {
+            "id": "get_user",
+            "upstream": "gql",
+            "description": "Fetch a user by id.",
+            "binding": {
+                "protocol": "graphql",
+                "operation_type": "query",
+                "document": "query GetUser($id: ID!) { user(id: $id) { id name } }",
+                "variables": [{"name": "id", "graphql_type": "ID!", "required": True}],
+            },
+        }
+    ],
+}
+
+
+def test_explicit_source_builds_a_graphql_operation():
+    config = Config.model_validate(_GRAPHQL_CONFIG)
+    ops = list(ExplicitSource(config).operations())
+    assert len(ops) == 1
+    op = ops[0]
+    assert isinstance(op.binding, GraphQlBinding)
+    assert op.effect is Effect.READ_ONLY
+    assert op.binding.variables[0].name == "id"
+
+
+def test_explicit_source_derived_effect_can_be_overridden_for_graphql_too():
+    payload = _GRAPHQL_CONFIG.copy()
+    payload["operations"] = [payload["operations"][0] | {"effect": "idempotent_write"}]
+    config = Config.model_validate(payload)
+    op = next(iter(ExplicitSource(config).operations()))
+    assert op.effect is Effect.IDEMPOTENT_WRITE

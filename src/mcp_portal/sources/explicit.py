@@ -9,15 +9,27 @@ identical tool schemas for identical bindings.
 import logging
 from collections.abc import Iterable
 
-from mcp_portal.classify import UnsupportedMethod, effect_for_method
+from mcp_portal.classify import (
+    UnsupportedMethod,
+    UnsupportedOperationType,
+    effect_for_method,
+    effect_for_operation_type,
+)
 from mcp_portal.config.loader import ConfigError
-from mcp_portal.config.models import Config, HttpBindingEntry, OperationEntry
+from mcp_portal.config.models import (
+    Config,
+    GraphQlBindingEntry,
+    HttpBindingEntry,
+    OperationEntry,
+)
 from mcp_portal.operations import (
     BodySpec,
+    GraphQlBinding,
     HttpBinding,
     Operation,
     Parameter,
     Sensitivity,
+    Variable,
 )
 from mcp_portal.sources.flatten import (
     FlattenError,
@@ -30,7 +42,7 @@ from mcp_portal.sources.flatten import (
 log = logging.getLogger("mcp_portal")
 
 
-def _binding(entry: HttpBindingEntry) -> HttpBinding:
+def _http_binding(entry: HttpBindingEntry) -> HttpBinding:
     return HttpBinding(
         method=entry.method.upper(),
         path=entry.path,
@@ -58,6 +70,17 @@ def _binding(entry: HttpBindingEntry) -> HttpBinding:
     )
 
 
+def _graphql_binding(entry: GraphQlBindingEntry) -> GraphQlBinding:
+    return GraphQlBinding(
+        operation_type=entry.operation_type,
+        document=entry.document,
+        variables=tuple(
+            Variable(name=v.name, graphql_type=v.graphql_type, required=v.required)
+            for v in entry.variables
+        ),
+    )
+
+
 class ExplicitSource:
     def __init__(self, config: Config) -> None:
         self._config = config
@@ -69,15 +92,43 @@ class ExplicitSource:
                 yield op
 
     def _build(self, entry: OperationEntry) -> Operation | None:
-        # ExplicitSource only handles HTTP bindings until Task 7 adds the
-        # GraphQL branch; this narrows the type for mypy without adding any
-        # GraphQL behavior here.
-        if not isinstance(entry.binding, HttpBindingEntry):
-            raise ConfigError(
-                f"operation {entry.id!r}: binding protocol {entry.binding.protocol!r} "
-                "is not yet supported by ExplicitSource"
-            )
-        binding = _binding(entry.binding)
+        if isinstance(entry.binding, GraphQlBindingEntry):
+            return self._build_graphql(entry, entry.binding)
+        return self._build_http(entry, entry.binding)
+
+    def _build_graphql(
+        self, entry: OperationEntry, binding_entry: GraphQlBindingEntry
+    ) -> Operation | None:
+        try:
+            derived_effect = effect_for_operation_type(binding_entry.operation_type)
+        except UnsupportedOperationType:
+            # `subscription` (and any other unsupported operation type) is dropped
+            # at the source, in every mode — even when config sets an explicit effect.
+            return None
+        effect = entry.effect or derived_effect
+
+        binding = _graphql_binding(binding_entry)
+        properties = {v.name: {"type": "string"} for v in binding.variables}
+        required = [v.name for v in binding.variables if v.required]
+        input_schema = {"type": "object", "properties": properties, "required": required}
+
+        return Operation(
+            id=entry.id,
+            upstream=entry.upstream,
+            name=entry.name or "",
+            title=entry.title or next(iter(entry.description.splitlines()), entry.id),
+            description=entry.description,
+            group_tags=tuple(entry.group_tags),
+            effect=effect,
+            sensitivity=entry.sensitivity or Sensitivity.NORMAL,
+            input_schema=input_schema,
+            binding=binding,
+        )
+
+    def _build_http(
+        self, entry: OperationEntry, binding_entry: HttpBindingEntry
+    ) -> Operation | None:
+        binding = _http_binding(binding_entry)
 
         try:
             derived_effect = effect_for_method(binding.method)
