@@ -164,6 +164,19 @@ class UpstreamConfig(Base):
             )
         return self
 
+    @model_validator(mode="after")
+    def _graphql_introspection_needs_base_url(self) -> Self:
+        if (
+            self.introspection is not None
+            and self.introspection.graphql is not None
+            and self.base_url is None
+        ):
+            raise ValueError(
+                "GraphQL introspection has no server-URL equivalent to OpenAPI's servers[]; "
+                "'base_url' is required alongside 'introspection.graphql'"
+            )
+        return self
+
 
 class ServerConfig(Base):
     name: str

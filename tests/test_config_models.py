@@ -7,6 +7,7 @@ from mcp_portal.config.models import (
     IntrospectionConfig,
     OutboundConfig,
     ServerConfig,
+    UpstreamConfig,
 )
 
 MINIMAL: dict = {
@@ -478,3 +479,20 @@ def test_token_exchange_with_http_and_inbound_enabled_is_valid():
         },
     }
     Config.model_validate(payload)  # does not raise
+
+
+def test_graphql_introspection_requires_base_url():
+    with pytest.raises(ValidationError, match="base_url"):
+        UpstreamConfig.model_validate(
+            {"introspection": {"graphql": {"url": "https://api.example.com/graphql"}}}
+        )
+
+
+def test_graphql_introspection_validates_with_base_url():
+    upstream = UpstreamConfig.model_validate(
+        {
+            "base_url": "https://api.example.com",
+            "introspection": {"graphql": {"url": "https://api.example.com/graphql"}},
+        }
+    )
+    assert upstream.base_url == "https://api.example.com"
