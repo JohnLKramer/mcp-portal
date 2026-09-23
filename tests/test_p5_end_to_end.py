@@ -44,7 +44,10 @@ def modifiable_openapi(tmp_path: Path) -> Path:
 
 
 def test_configure_then_reconcile_after_an_upstream_change(
-    tmp_path: Path, modifiable_openapi: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    modifiable_openapi: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     config_path = _write_config(tmp_path, modifiable_openapi)
     policy_path = tmp_path / "policy.yaml"
@@ -101,6 +104,34 @@ def test_configure_then_reconcile_after_an_upstream_change(
     monkeypatch.setattr("builtins.input", _always_yes)
     code = main(["configure", "--config", str(config_path), "--policy", str(policy_path)])
     assert code == 0
+
+    # Assert on the CLI's own printed reconcile-report lines, not just final
+    # membership: `run_survey`'s group-accept-all path answers "y" and
+    # preserves `op.effect` regardless of whether an operation should have
+    # been surveyed at all, so final-state membership/effect checks alone
+    # can't distinguish correct reconcile classification from a bug that
+    # re-surveys `unchanged` operations. Pull out the specific "new" and
+    # "changed" report lines (see `_run_configure` in `cli.py`) and check
+    # exact-id membership within each line individually, since
+    # "get_invoice" is a substring of "get_invoice_history".
+    out_lines = capsys.readouterr().out.splitlines()
+    new_lines = [line for line in out_lines if line.startswith("new operation(s) surveyed:")]
+    changed_lines = [
+        line for line in out_lines if line.startswith("changed operation(s) re-confirmed:")
+    ]
+    assert len(new_lines) == 1, f"expected exactly one 'new' report line, got: {out_lines}"
+    assert len(changed_lines) == 1, f"expected exactly one 'changed' report line, got: {out_lines}"
+    new_line, changed_line = new_lines[0], changed_lines[0]
+
+    assert "'get_invoice_history'" in new_line
+    assert "'get_invoice'" not in new_line  # not conflated with get_invoice_history
+
+    assert "'get_invoice'" in changed_line
+    assert "'get_invoice_history'" not in changed_line
+
+    for unchanged_id in ("list_invoices", "create_invoice", "cancel_invoice"):
+        assert f"'{unchanged_id}'" not in new_line
+        assert f"'{unchanged_id}'" not in changed_line
 
     loaded_again = load_config(config_path)
     second_ids = {op.id for op in loaded_again.config.operations}
