@@ -74,6 +74,12 @@ class HttpServerConfig(Base):
     # non-loopback escape hatch has no way to name their public hostname, and
     # the SDK's DNS-rebinding defense rejects every request with a 421.
     allowed_hosts: list[str] = Field(default_factory=list)
+    # Passed straight through to `Server.streamable_http_app`. `None` means
+    # "use the SDK's own default" (`DEFAULT_SESSION_IDLE_TIMEOUT` /
+    # `DEFAULT_MAX_SESSIONS`) rather than mcp-portal redeclaring those
+    # numbers and risking drift from the SDK's.
+    session_idle_timeout_s: float | None = None
+    max_sessions: int | None = None
 
 
 class OutboundConfig(Base):

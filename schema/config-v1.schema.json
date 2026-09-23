@@ -166,6 +166,30 @@
           },
           "title": "Allowed Hosts",
           "type": "array"
+        },
+        "session_idle_timeout_s": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Session Idle Timeout S"
+        },
+        "max_sessions": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Sessions"
         }
       },
       "title": "HttpServerConfig",
