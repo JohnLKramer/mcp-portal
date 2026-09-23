@@ -199,6 +199,24 @@ def _rpc(method: str, **params: Any) -> dict[str, Any]:
     return {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
 
 
+async def _initialize(client: httpx.AsyncClient, headers: dict[str, str]) -> str:
+    """Perform the MCP `initialize` handshake and return the issued `Mcp-Session-Id`."""
+    response = await client.post(
+        "/mcp",
+        json=_rpc(
+            "initialize",
+            protocolVersion="2025-06-18",
+            capabilities={},
+            clientInfo={"name": "test-client", "version": "0.0.1"},
+        ),
+        headers=headers,
+    )
+    assert response.status_code == 200, response.text
+    session_id = response.headers["mcp-session-id"]
+    assert session_id
+    return session_id
+
+
 MCP_HEADERS = {
     "Origin": "https://client.example.com",
     "Content-Type": "application/json",
@@ -216,10 +234,12 @@ async def test_a_call_without_the_required_claim_is_denied_before_the_upstream_i
         tmp_path, monkeypatch, _idp_and_upstream_handler(jwk, token_requests, upstream_requests)
     ) as client:
         token = _bearer(rsa_key)  # no authorization_details claim at all
+        headers = MCP_HEADERS | {"Authorization": f"Bearer {token}"}
+        session_id = await _initialize(client, headers)
         response = await client.post(
             "/mcp",
             json=_rpc("tools/call", name="initiate_payment", arguments={"amount": 100}),
-            headers=MCP_HEADERS | {"Authorization": f"Bearer {token}"},
+            headers=headers | {"Mcp-Session-Id": session_id},
         )
 
     assert response.status_code == 200
@@ -241,10 +261,12 @@ async def test_a_call_with_the_claim_succeeds_and_carries_the_exchanged_token(
         tmp_path, monkeypatch, _idp_and_upstream_handler(jwk, token_requests, upstream_requests)
     ) as client:
         caller_token = _bearer(rsa_key, authorization_details=[PRESENTED_DETAIL])
+        headers = MCP_HEADERS | {"Authorization": f"Bearer {caller_token}"}
+        session_id = await _initialize(client, headers)
         response = await client.post(
             "/mcp",
             json=_rpc("tools/call", name="initiate_payment", arguments={"amount": 100}),
-            headers=MCP_HEADERS | {"Authorization": f"Bearer {caller_token}"},
+            headers=headers | {"Mcp-Session-Id": session_id},
         )
 
     # (2) The call with the claim succeeds.

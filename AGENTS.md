@@ -149,7 +149,7 @@ live in `tests/integration/fixtures/` (`stack.yaml`, `stack-introspection.yaml`,
 |---|---|
 | OpenAPI parsing | hand-rolled (`sources/openapi*.py`) + `jsonschema` |
 | RAR (RFC 9396) | hand-rolled (`auth/rar.py`, `policy.py`) — small predicate, no library |
-| Streaming HTTP transport | `mcp` SDK (`StreamableHTTPSessionManager`, P4b) |
+| Streaming HTTP transport | `mcp` SDK (`StreamableHTTPSessionManager`, stateful sessions + SSE) |
 | stdio transport | `mcp` SDK (`stdio_server`, P1) |
 | JWT | `pyjwt[crypto]` (P4b; also mocks/billing in P4.1) |
 | Mock HTTP backends | Flask + `gunicorn` |

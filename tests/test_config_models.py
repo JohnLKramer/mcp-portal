@@ -295,6 +295,29 @@ def test_transport_http_defaults_its_own_server_config():
     assert cfg.http.allowed_hosts == []
 
 
+def test_http_transport_session_knobs_default_to_none():
+    cfg = ServerConfig(name="s", transport="http")
+    assert cfg.http.session_idle_timeout_s is None
+    assert cfg.http.max_sessions is None
+
+
+def test_http_transport_session_knobs_are_settable():
+    cfg = ServerConfig(
+        name="s",
+        transport="http",
+        http={"session_idle_timeout_s": 5.0, "max_sessions": 3},
+    )
+    assert cfg.http.session_idle_timeout_s == 5.0
+    assert cfg.http.max_sessions == 3
+
+
+def test_http_transport_session_knobs_reject_non_positive_values():
+    with pytest.raises(ValidationError):
+        ServerConfig(name="s", transport="http", http={"session_idle_timeout_s": 0})
+    with pytest.raises(ValidationError):
+        ServerConfig(name="s", transport="http", http={"max_sessions": 0})
+
+
 def test_inbound_disabled_by_default():
     cfg = Config.model_validate(MINIMAL)
     assert cfg.auth.inbound.enabled is False

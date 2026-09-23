@@ -21,6 +21,7 @@ from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.auth.provider import AccessToken, TokenVerifier
 from mcp.server.auth.settings import AuthSettings
 from mcp.server.lowlevel import Server
+from mcp.server.streamable_http_manager import DEFAULT_MAX_SESSIONS, DEFAULT_SESSION_IDLE_TIMEOUT
 from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import ValidationError
 from starlette.applications import Starlette
@@ -221,10 +222,10 @@ def build_http_app(app: App, config: Config, secrets: Mapping[str, str]) -> Star
     constructed from a loaded config; inbound auth needs none of them today
     (the IdP is contacted anonymously for its JWKS).
     """
+    http = config.server.http
     inbound = config.auth.inbound
     verifier = _InboundVerifier(inbound) if inbound.enabled else None
     if verifier is None:
-        http = config.server.http
         names = sorted(tool.name for tool in app.invoker.tools())
         log.warning(
             "transport 'http' with auth.inbound.enabled=false on %s: the local principal "
@@ -238,11 +239,24 @@ def build_http_app(app: App, config: Config, secrets: Mapping[str, str]) -> Star
 
     server = _build_server(app, config, verifier)
     return server.streamable_http_app(
-        streamable_http_path=config.server.http.path,
-        # A fresh transport per request: no session state to confuse one
-        # caller's authorization with another's, and no session for a stolen
-        # session id to ride on.
-        stateless_http=True,
+        streamable_http_path=http.path,
+        # Sessions are on: `Mcp-Session-Id` is issued and `GET` opens an SSE
+        # channel, which several MCP clients expect after `initialize`. A
+        # session id alone is never a credential — every request is still
+        # independently bearer-verified — and the SDK's own
+        # `StreamableHTTPSessionManager` already binds each session to the
+        # `AuthorizationContext` (subject/client_id/issuer) of whoever
+        # created it, rejecting a mismatched reuse with 404 before this
+        # server ever sees the request — when a bearer principal exists
+        # (`auth.inbound.enabled=true`); without one there is no
+        # `AuthorizationContext` to bind to.
+        stateless_http=False,
+        session_idle_timeout=(
+            http.session_idle_timeout_s
+            if http.session_idle_timeout_s is not None
+            else DEFAULT_SESSION_IDLE_TIMEOUT
+        ),
+        max_sessions=http.max_sessions if http.max_sessions is not None else DEFAULT_MAX_SESSIONS,
         transport_security=_security_settings(config),
         auth=_auth_settings(inbound) if verifier is not None else None,
         token_verifier=verifier,
