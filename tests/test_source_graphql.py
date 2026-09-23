@@ -41,7 +41,26 @@ _RESULT = {
                                 }
                             ],
                             "type": {"kind": "OBJECT", "name": "User", "ofType": None},
-                        }
+                        },
+                        {
+                            "name": "deleteUser",
+                            "args": [
+                                {
+                                    "name": "id",
+                                    "type": {
+                                        "kind": "NON_NULL",
+                                        "name": None,
+                                        "ofType": {"kind": "SCALAR", "name": "ID", "ofType": None},
+                                    },
+                                }
+                            ],
+                            "type": {"kind": "SCALAR", "name": "Boolean", "ofType": None},
+                        },
+                        {
+                            "name": "orphanCreate",
+                            "args": [],
+                            "type": {"kind": "OBJECT", "name": "Nonexistent", "ofType": None},
+                        },
                     ],
                 },
                 {
@@ -70,7 +89,7 @@ def test_one_operation_per_top_level_query_and_mutation_field():
     schema = parse_introspection_result(_RESULT)
     source = GraphQlSource("my-graphql-api", schema, type_policy={})
     ops = list(source.operations())
-    assert {op.id for op in ops} == {"user", "createUser"}
+    assert {op.id for op in ops} == {"user", "createUser", "deleteUser"}
 
 
 def test_query_classifies_read_only_and_mutation_classifies_action():
@@ -96,3 +115,25 @@ def test_type_policy_excludes_field_from_the_generated_document():
     binding = by_id["user"].binding
     assert isinstance(binding, GraphQlBinding)
     assert "ssn" not in binding.document
+
+
+def test_field_with_unknown_return_type_is_skipped_not_fatal():
+    # "orphanCreate" returns "Nonexistent", which has no entry in
+    # types_by_name — build_selection_set raises SelectionError for it. That
+    # must not abort the whole generator: every other field must still be
+    # produced.
+    schema = parse_introspection_result(_RESULT)
+    source = GraphQlSource("my-graphql-api", schema, type_policy={})
+    ops = list(source.operations())
+    ids = {op.id for op in ops}
+    assert "orphanCreate" not in ids
+    assert {"user", "createUser", "deleteUser"} <= ids
+
+
+def test_scalar_returning_field_has_no_selection_set():
+    schema = parse_introspection_result(_RESULT)
+    source = GraphQlSource("my-graphql-api", schema, type_policy={})
+    by_id = {op.id: op for op in source.operations()}
+    binding = by_id["deleteUser"].binding
+    assert isinstance(binding, GraphQlBinding)
+    assert binding.document == "mutation($id: ID!) { deleteUser(id: $id) }"

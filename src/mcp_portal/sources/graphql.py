@@ -7,6 +7,7 @@ this module only decides which top-level fields exist and wires their
 variables into an input schema, same as OpenAPI wires parameters.
 """
 
+import logging
 from collections.abc import Iterable, Mapping
 from typing import Literal
 
@@ -18,17 +19,20 @@ from mcp_portal.sources.graphql_introspection import (
     named_type,
     render_type_ref,
 )
-from mcp_portal.sources.graphql_selection import build_selection_set
+from mcp_portal.sources.graphql_selection import SelectionError, build_selection_set
+
+log = logging.getLogger("mcp_portal")
 
 
 def _document(
-    operation_type: Literal["query", "mutation"], field: FieldInfo, selection: str
+    operation_type: Literal["query", "mutation"], field: FieldInfo, selection: str | None
 ) -> str:
     args = ", ".join(f"${arg.name}: {render_type_ref(arg.type)}" for arg in field.args)
     call_args = ", ".join(f"{arg.name}: ${arg.name}" for arg in field.args)
     var_decl = f"({args})" if args else ""
     call = f"{field.name}({call_args})" if call_args else field.name
-    return f"{operation_type}{var_decl} {{ {call} {selection} }}"
+    call_with_selection = f"{call} {selection}" if selection is not None else call
+    return f"{operation_type}{var_decl} {{ {call_with_selection} }}"
 
 
 def _input_schema(field: FieldInfo) -> dict[str, object]:
@@ -70,11 +74,26 @@ class GraphQlSource:
             return None
 
         return_type = named_type(field.type)
-        selection = (
-            build_selection_set(return_type.name, self._schema, self._type_policy)
-            if return_type.name is not None
-            else "{ __typename }"
-        )
+        selection: str | None
+        if return_type.kind not in ("OBJECT", "INTERFACE"):
+            # Scalars, enums, and unions carry no sub-selection at all — not
+            # even an empty `{ }` or `{ __typename }`.
+            selection = None
+        elif return_type.name is None:
+            selection = "{ __typename }"
+        else:
+            try:
+                selection = build_selection_set(return_type.name, self._schema, self._type_policy)
+            except SelectionError as exc:
+                log.warning(
+                    "upstream %r: dropping %s %s: %s",
+                    self._upstream_key,
+                    operation_type,
+                    field.name,
+                    exc,
+                )
+                return None
+
         binding = GraphQlBinding(
             operation_type=operation_type,
             document=_document(operation_type, field, selection),
