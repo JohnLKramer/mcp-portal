@@ -379,3 +379,36 @@ async def test_inbound_disabled_on_loopback_uses_the_local_principal(
     assert response.status_code == 200
     assert "invoices" in response.text
     assert [p and p.identity for p in principals] == ["local"]
+
+
+async def _initialize(client: httpx.AsyncClient, headers: dict[str, str]) -> str:
+    """Perform the MCP `initialize` handshake and return the issued `Mcp-Session-Id`."""
+    response = await client.post(
+        "/mcp",
+        json=_rpc(
+            "initialize",
+            protocolVersion="2025-06-18",
+            capabilities={},
+            clientInfo={"name": "test-client", "version": "0.0.1"},
+        ),
+        headers=headers,
+    )
+    assert response.status_code == 200, response.text
+    session_id = response.headers["mcp-session-id"]
+    assert session_id
+    return session_id
+
+
+@pytest.mark.anyio
+async def test_initialize_issues_a_session_id_reusable_on_a_later_call(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, jwk: dict[str, Any]
+) -> None:
+    async with _client_for(tmp_path, monkeypatch, _config(), handler=_idp_handler(jwk)) as client:
+        session_id = await _initialize(client, MCP_HEADERS)
+        response = await client.post(
+            "/mcp",
+            json=_rpc("tools/call", name="list_invoices", arguments={}),
+            headers=MCP_HEADERS | {"Mcp-Session-Id": session_id},
+        )
+    assert response.status_code == 200
+    assert "invoices" in response.text
