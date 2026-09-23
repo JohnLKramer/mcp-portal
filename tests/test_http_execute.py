@@ -247,6 +247,51 @@ async def test_a_retry_after_inside_the_total_budget_is_still_honoured():
 
 
 @pytest.mark.anyio
+async def test_a_retry_after_on_a_503_is_ignored_in_favor_of_jittered_backoff(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    # Retry-After is only trustworthy on a 429; a 503 carrying the same header
+    # must still fall back to jittered backoff instead of sleeping off the
+    # header's value. Pin jitter to a small, deterministic value so the
+    # assertion isn't racing the real 3s the header asks for.
+    monkeypatch.setattr(random, "uniform", lambda _low, high: high)
+
+    calls = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return httpx.Response(503, text="down", headers={"retry-after": "3"})
+        return httpx.Response(200, text="ok")
+
+    started = time.monotonic()
+    result = await transport(handler, timeout_ms=1000, max_total_ms=5000).execute(op(), {})
+    elapsed = time.monotonic() - started
+
+    assert calls == 2
+    assert result.status == 200
+    assert elapsed < 0.5  # not the 3s the header asked for on a non-429 status
+
+
+@pytest.mark.anyio
+async def test_non_utf8_charset_is_decoded_charset_aware_not_utf8_replace():
+    # ISO-8859-1 0xe9 is "é"; decoding those bytes as UTF-8 with errors="replace"
+    # produces the replacement character instead, so this distinguishes a
+    # charset-aware decode (httpx's response.text) from a hardcoded UTF-8 decode.
+    body = "café".encode("iso-8859-1")
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200, content=body, headers={"content-type": "text/plain; charset=iso-8859-1"}
+        )
+
+    result = await transport(handler).execute(op(), {})
+    assert result.text == "café"
+    assert "�" not in result.text
+
+
+@pytest.mark.anyio
 async def test_the_credential_header_reaches_the_outbound_request():
     seen: list[httpx.Request] = []
 

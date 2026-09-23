@@ -215,7 +215,8 @@ class HttpTransport:
         well past the total the operator configured.
         """
         header = response.headers.get("retry-after") if response is not None else None
-        delay = retry_delay_s(attempt, header)
+        status_code = response.status_code if response is not None else None
+        delay = retry_delay_s(attempt, status_code, header)
         remaining = self._remaining_s(started)
         # Below the gate `delay` is already strictly under `remaining`, so the
         # sleep needs no separate clamp: the budget bounds it by construction.
@@ -227,7 +228,9 @@ class HttpTransport:
     def _map(self, response: httpx.Response) -> HttpResponse:
         raw = response.content
         content_type = response.headers.get("content-type", "").split(";")[0].strip()
-        text, truncated = map_body(raw, content_type, self._upstream.max_response_bytes)
+        text, truncated = map_body(
+            raw, content_type, self._upstream.max_response_bytes, decoded_text=response.text
+        )
         return HttpResponse(
             status=response.status_code, text=text, truncated=truncated, original_bytes=len(raw)
         )

@@ -29,19 +29,33 @@ def is_textual(content_type: str) -> bool:
     return content_type in _TEXTUAL_TYPES or content_type.endswith(_TEXTUAL_SUFFIXES)
 
 
-def retry_delay_s(attempt: int, retry_after_header: str | None) -> float:
-    if retry_after_header and retry_after_header.isdigit():
+def retry_delay_s(attempt: int, status_code: int | None, retry_after_header: str | None) -> float:
+    """Retry-After is only trustworthy on a 429: a rate limiter is telling the
+    caller precisely when it will accept traffic again. On a 502/503/504 the
+    header (when even present) reflects an intermediary's guess, not a
+    guarantee, so those statuses always fall back to jittered backoff."""
+    if status_code == 429 and retry_after_header and retry_after_header.isdigit():
         return min(float(retry_after_header), RETRY_AFTER_CAP_S)
     backoff = _BACKOFF_BASE_S * (2**attempt)
     return random.uniform(0, backoff)  # noqa: S311 - jitter, not crypto
 
 
-def map_body(raw: bytes, content_type: str, cap: int) -> tuple[str, bool]:
+def map_body(
+    raw: bytes, content_type: str, cap: int, decoded_text: str | None = None
+) -> tuple[str, bool]:
     """Return `(text, truncated)` for a response body, honoring the same
-    textual/binary and size-cap rules for every transport."""
+    textual/binary and size-cap rules for every transport.
+
+    `decoded_text` is an optional charset-aware decode of the full body (e.g.
+    httpx's `response.text`, which honors a `charset=` on the Content-Type
+    header or httpx's own encoding detection). It is used verbatim when the
+    body fits under `cap`. The truncated path still decodes a raw byte slice
+    with `errors="replace"`, since a pre-decoded string can't be re-sliced by
+    byte offset without risking a split multi-byte character.
+    """
     if not is_textual(content_type):
         return f"[{len(raw)} bytes of {content_type or 'unknown content type'}, not inlined]", False
     if len(raw) <= cap:
-        return raw.decode(errors="replace"), False
+        return (decoded_text if decoded_text is not None else raw.decode(errors="replace")), False
     body = raw[:cap].decode(errors="replace")
     return body + f"\n\n[truncated: {len(raw)} bytes total, {cap} shown]", True
