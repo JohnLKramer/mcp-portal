@@ -222,10 +222,10 @@ def build_http_app(app: App, config: Config, secrets: Mapping[str, str]) -> Star
     constructed from a loaded config; inbound auth needs none of them today
     (the IdP is contacted anonymously for its JWKS).
     """
+    http = config.server.http
     inbound = config.auth.inbound
     verifier = _InboundVerifier(inbound) if inbound.enabled else None
     if verifier is None:
-        http = config.server.http
         names = sorted(tool.name for tool in app.invoker.tools())
         log.warning(
             "transport 'http' with auth.inbound.enabled=false on %s: the local principal "
@@ -237,7 +237,6 @@ def build_http_app(app: App, config: Config, secrets: Mapping[str, str]) -> Star
             ", ".join(names) or "(none)",
         )
 
-    http = config.server.http
     server = _build_server(app, config, verifier)
     return server.streamable_http_app(
         streamable_http_path=http.path,
@@ -248,7 +247,9 @@ def build_http_app(app: App, config: Config, secrets: Mapping[str, str]) -> Star
         # `StreamableHTTPSessionManager` already binds each session to the
         # `AuthorizationContext` (subject/client_id/issuer) of whoever
         # created it, rejecting a mismatched reuse with 404 before this
-        # server ever sees the request.
+        # server ever sees the request — when a bearer principal exists
+        # (`auth.inbound.enabled=true`); without one there is no
+        # `AuthorizationContext` to bind to.
         stateless_http=False,
         session_idle_timeout=(
             http.session_idle_timeout_s

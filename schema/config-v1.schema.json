@@ -170,6 +170,7 @@
         "session_idle_timeout_s": {
           "anyOf": [
             {
+              "exclusiveMinimum": 0,
               "type": "number"
             },
             {
@@ -182,6 +183,7 @@
         "max_sessions": {
           "anyOf": [
             {
+              "exclusiveMinimum": 0,
               "type": "integer"
             },
             {

@@ -64,7 +64,14 @@ then forwards it to the upstream over HTTP.
   `GET`/SSE streaming, the Origin/Host DNS-rebinding defense, and RFC 9728
   protected-resource metadata are all built in. A session is bound to the
   bearer principal that created it — a mismatched reuse is rejected, never
-  silently mixed.
+  silently mixed (when `auth.inbound.enabled: true`; without inbound auth,
+  sessions aren't bound to any principal, consistent with that mode's
+  existing guardrail-not-boundary status). Clients must complete the MCP
+  `initialize` handshake before any other call — a client that sends
+  `tools/call` first now gets a `400` — and because session state lives in
+  process memory, multiple gateway replicas behind a non-sticky load balancer
+  will see intermittent session-not-found errors (horizontal scaling is out
+  of scope, per the design spec).
 - **Inbound OAuth and outbound `client_credentials`/`token_exchange`** —
   under `transport: http`, `auth.inbound` validates the caller's own bearer
   JWT (RFC 9068, JWKS-backed) and evaluates RAR policy against its

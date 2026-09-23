@@ -311,6 +311,13 @@ def test_http_transport_session_knobs_are_settable():
     assert cfg.http.max_sessions == 3
 
 
+def test_http_transport_session_knobs_reject_non_positive_values():
+    with pytest.raises(ValidationError):
+        ServerConfig(name="s", transport="http", http={"session_idle_timeout_s": 0})
+    with pytest.raises(ValidationError):
+        ServerConfig(name="s", transport="http", http={"max_sessions": 0})
+
+
 def test_inbound_disabled_by_default():
     cfg = Config.model_validate(MINIMAL)
     assert cfg.auth.inbound.enabled is False

@@ -78,8 +78,8 @@ class HttpServerConfig(Base):
     # "use the SDK's own default" (`DEFAULT_SESSION_IDLE_TIMEOUT` /
     # `DEFAULT_MAX_SESSIONS`) rather than mcp-portal redeclaring those
     # numbers and risking drift from the SDK's.
-    session_idle_timeout_s: float | None = None
-    max_sessions: int | None = None
+    session_idle_timeout_s: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+    max_sessions: int | None = Field(default=None, gt=0)
 
 
 class OutboundConfig(Base):
