@@ -91,17 +91,48 @@ def render_policy(
     """Render the policy file, preserving every hand-authored rule untouched.
 
     A rule is "configure-owned" — and therefore safe to regenerate — only
-    when its `match` is an exact single-id match (`ids=[op_id]`, nothing
-    else) for an operation `configure` is currently managing. Every other
-    rule (tag/upstream/effect/sensitivity-matched, multi-id, or matching an
-    id `configure` doesn't know about) is preserved verbatim: this is the
-    only way to keep the module-level invariant in `config/policy.py`
+    when BOTH of the following hold:
+
+    1. Its `match` is an exact single-id match (`ids=[op_id]`, nothing else)
+       for an operation `configure` is currently managing.
+    2. Its existing content is fully representable by `RequiredDetail`
+       (`configure`'s own requirement model, which carries only `type` and
+       `actions`) — i.e. `outbound.carry` is `False` and `require` is either
+       absent or has exactly one `authorization_details` entry using only
+       `type`/`actions`.
+
+    Every other rule (tag/upstream/effect/sensitivity-matched, multi-id,
+    matching an id `configure` doesn't know about, or matching by id but
+    carrying content `configure` cannot express, such as `outbound.carry`,
+    `locations`, `datatypes`, `identifier`, `privileges`, or multiple
+    `authorization_details` entries) is preserved verbatim: this is the only
+    way to keep the module-level invariant in `config/policy.py`
     ("authorization policy must never be silently regenerated from a third
     party's schema") true across a `configure` write.
     """
     decision_ids = {d.operation.id for d in decisions}
 
-    def _is_configure_owned(rule: PolicyRule) -> bool:
+    def _within_required_detail_shape(rule: PolicyRule) -> bool:
+        """Whether this rule's content is fully representable by
+        `RequiredDetail` (type + actions only, no `outbound.carry`,
+        `locations`, `datatypes`, `identifier`, or `privileges`, and at
+        most one `authorization_details` entry). A rule that isn't is
+        preserved as foreign even if its `match` looks configure-shaped —
+        regenerating it would silently drop content `configure` cannot
+        express, which is the authorization-loosening this guard exists
+        to prevent.
+        """
+        if rule.outbound.carry:
+            return False
+        if rule.require is None:
+            return True
+        details = rule.require.authorization_details
+        if len(details) != 1:
+            return False
+        detail = details[0]
+        return not (detail.locations or detail.datatypes or detail.identifier or detail.privileges)
+
+    def _matches_configure_id_shape(rule: PolicyRule) -> bool:
         match = rule.match
         return (
             len(match.ids) == 1
@@ -112,15 +143,27 @@ def render_policy(
             and not match.sensitivity
         )
 
+    def _is_configure_owned(rule: PolicyRule) -> bool:
+        return _matches_configure_id_shape(rule) and _within_required_detail_shape(rule)
+
     foreign_rules: list[dict[str, Any]] = []
+    # Ids whose only reason for being foreign is that their content is
+    # richer than `RequiredDetail` can represent: `configure` must not also
+    # emit its own generated rule for these ids, or the id would end up
+    # matched by two rules in the rendered policy.
+    foreign_id_shaped_ids: set[str] = set()
     if existing_policy is not None:
         for rule in existing_policy.rules:
             if not _is_configure_owned(rule):
                 foreign_rules.append(rule.model_dump(mode="json", by_alias=True, exclude_none=True))
+                if _matches_configure_id_shape(rule):
+                    foreign_id_shaped_ids.add(rule.match.ids[0])
 
     owned_rules: list[dict[str, Any]] = []
     for decision in decisions:
         if not decision.exposed or decision.require is None:
+            continue
+        if decision.operation.id in foreign_id_shaped_ids:
             continue
         owned_rules.append(
             {

@@ -64,6 +64,77 @@ def test_render_policy_adds_a_rule_only_for_operations_with_a_required_detail():
     assert rule["require"]["authorization_details"][0]["actions"] == ["initiate"]
 
 
+def test_render_policy_regenerates_a_simple_type_and_actions_only_rule():
+    from mcp_portal.config.policy import AuthorizationDetailRequirement as PolicyAuthDetail
+    from mcp_portal.config.policy import (
+        PolicyConfig,
+        PolicyMatchSpec,
+        PolicyRule,
+        RequireConfig,
+    )
+
+    simple_rule = PolicyRule(
+        match=PolicyMatchSpec(ids=["create_invoice"]),
+        require=RequireConfig(
+            authorization_details=[
+                PolicyAuthDetail(type="payment_initiation", actions=["initiate"])
+            ]
+        ),
+    )
+    existing_policy = PolicyConfig(version="1", rules=[simple_rule])
+
+    decision = _decision(
+        "create_invoice",
+        require=RequiredDetail(type="payment_initiation", actions=("initiate", "confirm")),
+    )
+    rendered = render_policy([decision], existing_policy=existing_policy)
+
+    assert len(rendered["rules"]) == 1
+    rule = rendered["rules"][0]
+    assert rule["require"]["authorization_details"][0]["actions"] == ["initiate", "confirm"]
+
+
+def test_render_policy_preserves_a_rich_id_matched_rule_configure_cannot_fully_represent():
+    from mcp_portal.config.policy import (
+        AuthorizationDetailRequirement,
+        PolicyConfig,
+        PolicyMatchSpec,
+        PolicyOutboundConfig,
+        PolicyRule,
+        RequireConfig,
+    )
+
+    rich_rule = PolicyRule(
+        match=PolicyMatchSpec(ids=["create_invoice"]),
+        outbound=PolicyOutboundConfig(carry=True),
+        require=RequireConfig(
+            authorization_details=[
+                AuthorizationDetailRequirement(
+                    type="payment_initiation",
+                    actions=["initiate"],
+                    locations=["https://api.example.com/v1/payments"],
+                )
+            ]
+        ),
+    )
+    existing_policy = PolicyConfig(version="1", rules=[rich_rule])
+
+    decision = _decision(
+        "create_invoice", require=RequiredDetail(type="payment_initiation", actions=("initiate",))
+    )
+    rendered = render_policy([decision], existing_policy=existing_policy)
+
+    # The rich rule must survive untouched — not narrowed to type+actions,
+    # not stripped of outbound.carry or locations, and not duplicated by a
+    # second configure-generated rule for the same operation.
+    assert len(rendered["rules"]) == 1
+    rule = rendered["rules"][0]
+    assert rule["outbound"]["carry"] is True
+    assert rule["require"]["authorization_details"][0]["locations"] == [
+        "https://api.example.com/v1/payments"
+    ]
+
+
 def test_write_with_confirmation_writes_json_when_confirmed(tmp_path: Path):
     path = tmp_path / "config.json"
     rendered = {"version": "1", "mode": "configured"}
