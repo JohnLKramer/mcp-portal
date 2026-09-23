@@ -1,9 +1,9 @@
 """Shared Docker lifecycle for every tests/integration/*.py Docker suite.
 
-One session-scoped stack: baking and starting all three services once
-(billing-mock, orders-mock, mock-oauth2-server) means every fixture file
-in this directory that calls billing-mock gets the same credential
-requirement enforced in exactly one place — the miss that let
+One session-scoped stack: baking and starting all four services once
+(billing-mock, orders-mock, graphql-mock, mock-oauth2-server) means every
+fixture file in this directory that calls billing-mock gets the same
+credential requirement enforced in exactly one place — the miss that let
 `stack.yaml` go uncredentialed after mocks/billing started requiring a
 bearer token could not happen with a single shared owner.
 """
@@ -23,6 +23,7 @@ MOCK_HEALTH_URLS = (
     "http://localhost:8081/healthz",
     "http://localhost:8082/healthz",
     "http://localhost:8083/default/.well-known/openid-configuration",
+    "http://localhost:8084/healthz",
 )
 
 
@@ -44,12 +45,21 @@ def mock_stack() -> Iterator[None]:
         pytest.skip("docker is not available")
 
     subprocess.run(
-        ["docker", "buildx", "bake", "billing-mock", "orders-mock"],
+        ["docker", "buildx", "bake", "billing-mock", "orders-mock", "graphql-mock"],
         cwd=REPO_ROOT,
         check=True,
     )
     subprocess.run(
-        ["docker", "compose", "up", "-d", "billing-mock", "orders-mock", "mock-oauth2-server"],
+        [
+            "docker",
+            "compose",
+            "up",
+            "-d",
+            "billing-mock",
+            "orders-mock",
+            "graphql-mock",
+            "mock-oauth2-server",
+        ],
         cwd=REPO_ROOT,
         check=True,
     )

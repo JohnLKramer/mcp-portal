@@ -1,5 +1,5 @@
 group "default" {
-  targets = ["mcp-portal", "billing-mock", "orders-mock"]
+  targets = ["mcp-portal", "billing-mock", "orders-mock", "graphql-mock"]
 }
 
 target "base-builder" {
@@ -36,6 +36,16 @@ target "orders-mock" {
   context    = "./mocks/orders"
   dockerfile = "Dockerfile"
   tags       = ["orders-mock:local"]
+  contexts = {
+    pybuilder = "target:base-builder"
+    pyruntime = "target:base-runtime"
+  }
+}
+
+target "graphql-mock" {
+  context    = "./mocks/graphql"
+  dockerfile = "Dockerfile"
+  tags       = ["graphql-mock:local"]
   contexts = {
     pybuilder = "target:base-builder"
     pyruntime = "target:base-runtime"

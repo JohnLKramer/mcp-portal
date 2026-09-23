@@ -1,0 +1,19 @@
+version: "1"
+mode: introspect-unsafe
+acknowledge_unsafe: true
+
+server:
+  name: integration-portal-graphql-unsafe
+  transport: stdio
+
+upstreams:
+  gql:
+    base_url: http://localhost:8084/graphql
+    introspection:
+      graphql:
+        url: http://localhost:8084/graphql
+        type_policy:
+          User: ["ssn"]
+
+naming:
+  strategy: operation_id
