@@ -1,3 +1,4 @@
+import asyncio
 import json
 
 import httpx
@@ -94,3 +95,60 @@ async def test_mutation_is_never_retried_on_a_retryable_status():
     op = make_op(effect=Effect.ACTION)
     await transport.execute(op, {"id": "u1"})
     assert attempts == 1
+
+
+@pytest.mark.anyio
+async def test_execute_treats_a_truncated_errors_response_as_failure():
+    # A large `errors` body gets truncated by `map_body` before display, but
+    # the failure classification must not depend on that: it has to be
+    # decided from the raw body, not the (possibly truncated) displayed text.
+    huge_message = "x" * 2000
+    payload = json.dumps({"data": None, "errors": [{"message": huge_message}]}).encode()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=payload, headers={"content-type": "application/json"})
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    upstream = UpstreamConfig(base_url="https://api.example.com", max_response_bytes=100)
+    transport = GraphQlTransport(client, upstream, StaticCredentialSource(None))
+    response = await transport.execute(make_op(), {"id": "u1"})
+    assert response.truncated
+    assert not (200 <= response.status < 300)
+
+
+@pytest.mark.anyio
+async def test_the_total_time_budget_stops_retrying_before_the_attempt_budget():
+    calls = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        await asyncio.sleep(0.05)
+        return httpx.Response(503, text="down")
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    # The per-attempt timeout leaves room for all three attempts; the total
+    # budget is spent by the end of the first one.
+    upstream = UpstreamConfig(base_url="https://api.example.com", timeout_ms=5000, max_total_ms=10)
+    transport = GraphQlTransport(client, upstream, StaticCredentialSource(None))
+    result = await transport.execute(make_op(), {"id": "u1"})
+    assert calls == 1
+    assert result.status == 503
+
+
+@pytest.mark.anyio
+async def test_a_generous_total_budget_leaves_the_attempt_budget_intact():
+    calls = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(502, text="bad gateway")
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    upstream = UpstreamConfig(
+        base_url="https://api.example.com", timeout_ms=5000, max_total_ms=60000
+    )
+    transport = GraphQlTransport(client, upstream, StaticCredentialSource(None))
+    await transport.execute(make_op(), {"id": "u1"})
+    assert calls == 3

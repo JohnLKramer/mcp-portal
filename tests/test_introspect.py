@@ -37,7 +37,7 @@ _GRAPHQL_CONFIG = {
     "server": {"name": "test", "transport": "stdio"},
     "upstreams": {
         "gql": {
-            "base_url": "https://api.example.com",
+            "base_url": "https://api.example.com/graphql",
             "introspection": {"graphql": {"url": "https://api.example.com/graphql"}},
         }
     },
@@ -75,7 +75,7 @@ def test_introspect_upstreams_builds_graphql_operations(tmp_path, monkeypatch):
     config = Config.model_validate(_GRAPHQL_CONFIG)
     ops, base_urls = introspect_upstreams(config, tmp_path)
     assert {op.id for op in ops} == {"ping"}
-    assert base_urls["gql"] == "https://api.example.com"
+    assert base_urls["gql"] == "https://api.example.com/graphql"
 
 
 def test_introspect_upstreams_wraps_a_graphql_introspection_failure(tmp_path, monkeypatch):

@@ -491,8 +491,18 @@ def test_graphql_introspection_requires_base_url():
 def test_graphql_introspection_validates_with_base_url():
     upstream = UpstreamConfig.model_validate(
         {
-            "base_url": "https://api.example.com",
+            "base_url": "https://api.example.com/graphql",
             "introspection": {"graphql": {"url": "https://api.example.com/graphql"}},
         }
     )
-    assert upstream.base_url == "https://api.example.com"
+    assert upstream.base_url == "https://api.example.com/graphql"
+
+
+def test_graphql_introspection_rejects_base_url_mismatch():
+    with pytest.raises(ValidationError, match="must match it"):
+        UpstreamConfig.model_validate(
+            {
+                "base_url": "https://api.example.com",
+                "introspection": {"graphql": {"url": "https://api.example.com/graphql"}},
+            }
+        )

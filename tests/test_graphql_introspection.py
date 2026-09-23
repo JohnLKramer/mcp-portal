@@ -105,3 +105,32 @@ def test_fetch_schema_rejects_a_response_carrying_graphql_errors():
     client = httpx.Client(transport=httpx.MockTransport(handler))
     with pytest.raises(GraphQlIntrospectionError, match="introspection disabled"):
         fetch_schema("https://api.example.com/graphql", client)
+
+
+def test_fetch_schema_wraps_an_http_status_error():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, text="internal error")
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    with pytest.raises(GraphQlIntrospectionError) as exc_info:
+        fetch_schema("https://api.example.com/graphql", client)
+    assert isinstance(exc_info.value.__cause__, httpx.HTTPStatusError)
+
+
+def test_fetch_schema_wraps_a_connection_error():
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused")
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    with pytest.raises(GraphQlIntrospectionError) as exc_info:
+        fetch_schema("https://api.example.com/graphql", client)
+    assert isinstance(exc_info.value.__cause__, httpx.ConnectError)
+
+
+def test_fetch_schema_wraps_a_non_json_body():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text="<html>not json</html>")
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    with pytest.raises(GraphQlIntrospectionError, match="not valid JSON"):
+        fetch_schema("https://api.example.com/graphql", client)

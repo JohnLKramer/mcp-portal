@@ -115,3 +115,11 @@ def test_fields_with_required_or_any_args_are_skipped():
 def test_unknown_type_raises():
     with pytest.raises(SelectionError):
         build_selection_set("DoesNotExist", _schema(), {})
+
+
+def test_all_fields_excluded_falls_back_to_typename_not_empty_braces():
+    # Excluding every field of "Profile" (its only field is "bio") must not
+    # produce the invalid `{\n\n}` — it should fall back to `{ __typename }`,
+    # the same shape already used for a nested-cycle truncation.
+    doc = build_selection_set("Profile", _schema(), {"Profile": ["bio"]})
+    assert doc == "{ __typename }"

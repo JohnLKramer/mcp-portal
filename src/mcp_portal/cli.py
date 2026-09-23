@@ -85,50 +85,55 @@ def _run_configure(config_path: Path, policy_path: Path | None) -> int:
         policy_path = _default_policy_path(config_path.resolve(), existing_policy_file)
 
     prompter = StdinPrompter()
-    operations, base_urls = introspect_upstreams(loaded.config, loaded.base_dir)
 
-    if loaded.config.operations:
-        previous = decisions_from_config(loaded.config, loaded.policy)
-        result, report = run_reconcile(operations, previous, prompter)
-        if report.removed:
-            print(f"removed upstream operation(s), dropped from output: {list(report.removed)}")
-        if report.new:
-            print(f"new operation(s) surveyed: {list(report.new)}")
-        if report.changed:
-            print(f"changed operation(s) re-confirmed: {list(report.changed)}")
-    else:
-        result = run_survey(operations, prompter)
+    try:
+        operations, base_urls = introspect_upstreams(loaded.config, loaded.base_dir)
 
-    # Start from a full dump of the loaded config rather than rebuilding it
-    # from the decisions: everything `configure` doesn't know how to touch
-    # (outbound credentials, timeouts, selection, naming, classification,
-    # inbound auth, HTTP bind settings) has to survive the write untouched.
-    operations_rendered = render_config(
-        result.decisions,
-        server_name=loaded.config.server.name,
-        upstream_base_urls=base_urls,
-        mode="configured",
-    )["operations"]
+        if loaded.config.operations:
+            previous = decisions_from_config(loaded.config, loaded.policy)
+            result, report = run_reconcile(operations, previous, prompter)
+            if report.removed:
+                print(f"removed upstream operation(s), dropped from output: {list(report.removed)}")
+            if report.new:
+                print(f"new operation(s) surveyed: {list(report.new)}")
+            if report.changed:
+                print(f"changed operation(s) re-confirmed: {list(report.changed)}")
+        else:
+            result = run_survey(operations, prompter)
 
-    rendered_config = loaded.config.model_dump(mode="json", by_alias=True, exclude_none=True)
-    # The survey's exposure decisions are only authoritative under
-    # 'configured'; every introspect-* mode re-discovers and re-merges,
-    # which would serve a declined operation anyway.
-    rendered_config["mode"] = "configured"
-    rendered_config["operations"] = operations_rendered
-    rendered_config["policy"] = {"file": str(policy_path)}
-    for key, url in base_urls.items():
-        if key in rendered_config["upstreams"] and url:
-            # Re-dumped from the model rather than assigned into the existing
-            # dict so a base_url that was absent before lands in declared
-            # field order, keeping a later no-op run a genuine no-op.
-            rendered_config["upstreams"][key] = (
-                loaded.config.upstreams[key]
-                .model_copy(update={"base_url": url})
-                .model_dump(mode="json", by_alias=True, exclude_none=True)
-            )
+        # Start from a full dump of the loaded config rather than rebuilding it
+        # from the decisions: everything `configure` doesn't know how to touch
+        # (outbound credentials, timeouts, selection, naming, classification,
+        # inbound auth, HTTP bind settings) has to survive the write untouched.
+        operations_rendered = render_config(
+            result.decisions,
+            server_name=loaded.config.server.name,
+            upstream_base_urls=base_urls,
+            mode="configured",
+        )["operations"]
 
-    rendered_policy = render_policy(result.decisions, existing_policy=loaded.policy)
+        rendered_config = loaded.config.model_dump(mode="json", by_alias=True, exclude_none=True)
+        # The survey's exposure decisions are only authoritative under
+        # 'configured'; every introspect-* mode re-discovers and re-merges,
+        # which would serve a declined operation anyway.
+        rendered_config["mode"] = "configured"
+        rendered_config["operations"] = operations_rendered
+        rendered_config["policy"] = {"file": str(policy_path)}
+        for key, url in base_urls.items():
+            if key in rendered_config["upstreams"] and url:
+                # Re-dumped from the model rather than assigned into the existing
+                # dict so a base_url that was absent before lands in declared
+                # field order, keeping a later no-op run a genuine no-op.
+                rendered_config["upstreams"][key] = (
+                    loaded.config.upstreams[key]
+                    .model_copy(update={"base_url": url})
+                    .model_dump(mode="json", by_alias=True, exclude_none=True)
+                )
+
+        rendered_policy = render_policy(result.decisions, existing_policy=loaded.policy)
+    except ConfigError as exc:
+        print(f"configuration error: {exc}", file=sys.stderr)
+        return 2
 
     if not write_with_confirmation(policy_path, rendered_policy, prompter):
         print("policy not written.")

@@ -137,3 +137,99 @@ def test_scalar_returning_field_has_no_selection_set():
     binding = by_id["deleteUser"].binding
     assert isinstance(binding, GraphQlBinding)
     assert binding.document == "mutation($id: ID!) { deleteUser(id: $id) }"
+
+
+def test_int_typed_argument_gets_an_integer_json_schema_type():
+    # createUser("name": String) has no Int arg in _RESULT; use a dedicated
+    # schema so the mapping is exercised end to end, not just at the
+    # unit-helper level.
+    schema = parse_introspection_result(
+        {
+            "data": {
+                "__schema": {
+                    "queryType": {"name": "Query"},
+                    "mutationType": None,
+                    "types": [
+                        {
+                            "kind": "OBJECT",
+                            "name": "Query",
+                            "fields": [
+                                {
+                                    "name": "posts",
+                                    "args": [
+                                        {
+                                            "name": "limit",
+                                            "type": {
+                                                "kind": "NON_NULL",
+                                                "name": None,
+                                                "ofType": {
+                                                    "kind": "SCALAR",
+                                                    "name": "Int",
+                                                    "ofType": None,
+                                                },
+                                            },
+                                        }
+                                    ],
+                                    "type": {"kind": "SCALAR", "name": "String", "ofType": None},
+                                }
+                            ],
+                        }
+                    ],
+                }
+            }
+        }
+    )
+    source = GraphQlSource("my-graphql-api", schema, type_policy={})
+    by_id = {op.id: op for op in source.operations()}
+    assert by_id["posts"].input_schema["properties"]["limit"] == {"type": "integer"}
+    assert by_id["posts"].input_schema["required"] == ["limit"]
+
+
+def test_optional_argument_is_not_marked_required():
+    # createUser("name": String) is nullable — no NON_NULL wrapper — so it
+    # must be present in `properties` but absent from `required`.
+    schema = parse_introspection_result(_RESULT)
+    source = GraphQlSource("my-graphql-api", schema, type_policy={})
+    by_id = {op.id: op for op in source.operations()}
+    input_schema = by_id["createUser"].input_schema
+    assert "name" in input_schema["properties"]
+    assert "name" not in input_schema["required"]
+
+
+def test_field_description_is_used_when_present():
+    schema = parse_introspection_result(
+        {
+            "data": {
+                "__schema": {
+                    "queryType": {"name": "Query"},
+                    "mutationType": None,
+                    "types": [
+                        {
+                            "kind": "OBJECT",
+                            "name": "Query",
+                            "fields": [
+                                {
+                                    "name": "ping",
+                                    "description": "Health-check the upstream.",
+                                    "args": [],
+                                    "type": {"kind": "SCALAR", "name": "String", "ofType": None},
+                                }
+                            ],
+                        }
+                    ],
+                }
+            }
+        }
+    )
+    source = GraphQlSource("my-graphql-api", schema, type_policy={})
+    by_id = {op.id: op for op in source.operations()}
+    assert by_id["ping"].description == "Health-check the upstream."
+    assert by_id["ping"].title == "Health-check the upstream."
+
+
+def test_field_without_description_falls_back_to_field_name():
+    schema = parse_introspection_result(_RESULT)
+    source = GraphQlSource("my-graphql-api", schema, type_policy={})
+    by_id = {op.id: op for op in source.operations()}
+    assert by_id["user"].description == "user"
+    assert by_id["user"].title == "user"

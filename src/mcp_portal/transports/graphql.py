@@ -6,8 +6,8 @@ are the same rules `HttpTransport` uses, imported from `transports/common.py`
 rather than re-derived.
 """
 
-import asyncio
 import json
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -16,7 +16,7 @@ import httpx
 from mcp_portal.auth.rar import AuthorizationDetail
 from mcp_portal.config.models import UpstreamConfig
 from mcp_portal.operations import Effect, GraphQlBinding, Operation
-from mcp_portal.transports.common import MAX_ATTEMPTS, is_retryable_status, map_body, retry_delay_s
+from mcp_portal.transports.common import MAX_ATTEMPTS, is_retryable_status, map_body, wait_for_retry
 from mcp_portal.transports.http import Credential, CredentialSource, PreparedRequest
 
 
@@ -64,10 +64,16 @@ class GraphQlTransport:
         # instead of `data`. Remapped to a synthetic non-2xx status so
         # server/mcp.py's existing `is_error = not (2xx)` check classifies it
         # correctly without any GraphQL-specific branching there.
+        #
+        # This check is against the raw body, not `text`/`truncated`: a large
+        # or non-textual error response must still fail the call, even though
+        # its *displayed* text ends up truncated or replaced with a
+        # placeholder. "GraphQL errors always mean failure" cannot depend on
+        # how much of the body happened to fit under the size cap.
         status = response.status_code
-        if status == 200 and not truncated:
+        if status == 200:
             try:
-                parsed = json.loads(text)
+                parsed = json.loads(raw)
             except ValueError:
                 parsed = None
             if isinstance(parsed, dict) and parsed.get("errors"):
@@ -95,6 +101,7 @@ class GraphQlTransport:
 
         attempts = MAX_ATTEMPTS if self._retryable(operation) else 1
         last: httpx.Response | None = None
+        started = time.monotonic()
 
         for attempt in range(attempts):
             try:
@@ -106,16 +113,27 @@ class GraphQlTransport:
                     timeout=self._upstream.timeout_ms / 1000,
                 )
             except httpx.TimeoutException:
-                if attempt == attempts - 1:
+                if attempt == attempts - 1 or not await self._wait_for_retry(
+                    started, attempt, None
+                ):
                     raise
-                await asyncio.sleep(retry_delay_s(attempt, None, None))
                 continue
 
             if not is_retryable_status(last.status_code) or attempt == attempts - 1:
                 return self._map(last)
-            await asyncio.sleep(
-                retry_delay_s(attempt, last.status_code, last.headers.get("retry-after"))
-            )
+            if not await self._wait_for_retry(started, attempt, last):
+                return self._map(last)
 
         assert last is not None
         return self._map(last)
+
+    async def _wait_for_retry(
+        self, started: float, attempt: int, response: httpx.Response | None
+    ) -> bool:
+        return await wait_for_retry(
+            started=started,
+            attempt=attempt,
+            response=response,
+            max_total_ms=self._upstream.max_total_ms,
+            per_attempt_timeout_s=self._upstream.timeout_ms / 1000,
+        )

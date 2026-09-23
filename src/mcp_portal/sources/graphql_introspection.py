@@ -23,6 +23,7 @@ query IntrospectionQuery {
       name
       fields(includeDeprecated: false) {
         name
+        description
         args { name type { ...TypeRef } }
         type { ...TypeRef }
       }
@@ -79,6 +80,7 @@ class FieldInfo:
     name: str
     type: TypeRef
     args: tuple[FieldArg, ...] = ()
+    description: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -143,6 +145,7 @@ def parse_introspection_result(data: Mapping[str, Any]) -> IntrospectedSchema:
                     FieldArg(name=a["name"], type=_parse_type_ref(a["type"]))
                     for a in raw_field.get("args", [])
                 ),
+                description=raw_field.get("description"),
             )
             for raw_field in (raw_type.get("fields") or [])
         )
@@ -159,9 +162,16 @@ def parse_introspection_result(data: Mapping[str, Any]) -> IntrospectedSchema:
 
 
 def fetch_schema(url: str, client: httpx.Client) -> IntrospectedSchema:
-    response = client.post(url, json={"query": _INTROSPECTION_QUERY})
-    response.raise_for_status()
-    body = response.json()
+    try:
+        response = client.post(url, json={"query": _INTROSPECTION_QUERY}, timeout=30.0)
+        response.raise_for_status()
+        body = response.json()
+    except httpx.HTTPError as exc:
+        raise GraphQlIntrospectionError(f"cannot fetch GraphQL schema {url!r}: {exc}") from exc
+    except ValueError as exc:
+        raise GraphQlIntrospectionError(
+            f"GraphQL introspection response from {url!r} is not valid JSON: {exc}"
+        ) from exc
     if body.get("errors"):
         raise GraphQlIntrospectionError(
             f"introspection query failed: {body['errors'][0].get('message', body['errors'])}"

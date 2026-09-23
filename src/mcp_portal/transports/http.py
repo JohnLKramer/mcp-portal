@@ -4,7 +4,6 @@
 boundary where model-supplied values become a real request.
 """
 
-import asyncio
 import json
 import time
 from collections.abc import Mapping
@@ -17,7 +16,12 @@ import httpx
 from mcp_portal.auth.rar import AuthorizationDetail
 from mcp_portal.config.models import UpstreamConfig
 from mcp_portal.operations import BodyMode, Effect, HttpBinding, Operation, ParamLocation
-from mcp_portal.transports.common import MAX_ATTEMPTS, is_retryable_status, map_body, retry_delay_s
+from mcp_portal.transports.common import (
+    MAX_ATTEMPTS,
+    is_retryable_status,
+    map_body,
+    wait_for_retry,
+)
 
 _CRLF = ("\r", "\n")
 
@@ -195,35 +199,16 @@ class HttpTransport:
         # Retrying a POST after a timeout is how a customer gets charged twice.
         return operation.effect in (Effect.READ_ONLY, Effect.IDEMPOTENT_WRITE)
 
-    def _remaining_s(self, started: float) -> float | None:
-        """Seconds left in the total wall-clock budget, or None when it is unbounded."""
-        budget_ms = self._upstream.max_total_ms
-        if budget_ms is None:
-            return None
-        return budget_ms / 1000 - (time.monotonic() - started)
-
     async def _wait_for_retry(
         self, started: float, attempt: int, response: httpx.Response | None
     ) -> bool:
-        """Wait before the next attempt; False when the budget cannot fund one.
-
-        `timeout_ms` bounds one attempt; `max_total_ms` bounds the retry loop as a
-        whole, so the wait and the attempt it buys have to fit in what is left of
-        the budget together. Asking only whether the budget was already spent let
-        a `Retry-After` of several seconds be slept off against a budget of a few
-        hundred milliseconds, and let three attempts plus backoff hold a caller
-        well past the total the operator configured.
-        """
-        header = response.headers.get("retry-after") if response is not None else None
-        status_code = response.status_code if response is not None else None
-        delay = retry_delay_s(attempt, status_code, header)
-        remaining = self._remaining_s(started)
-        # Below the gate `delay` is already strictly under `remaining`, so the
-        # sleep needs no separate clamp: the budget bounds it by construction.
-        if remaining is not None and delay + self._upstream.timeout_ms / 1000 > remaining:
-            return False
-        await asyncio.sleep(delay)
-        return True
+        return await wait_for_retry(
+            started=started,
+            attempt=attempt,
+            response=response,
+            max_total_ms=self._upstream.max_total_ms,
+            per_attempt_timeout_s=self._upstream.timeout_ms / 1000,
+        )
 
     def _map(self, response: httpx.Response) -> HttpResponse:
         raw = response.content

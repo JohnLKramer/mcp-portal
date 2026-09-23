@@ -177,6 +177,21 @@ class UpstreamConfig(Base):
             )
         return self
 
+    @model_validator(mode="after")
+    def _graphql_base_url_matches_introspection(self) -> Self:
+        if (
+            self.introspection is not None
+            and self.introspection.graphql is not None
+            and self.base_url is not None
+            and self.base_url != self.introspection.graphql.url
+        ):
+            raise ValueError(
+                "GraphQL runtime calls are made against 'base_url'; "
+                "'introspection.graphql.url' must match it, or a mismatch means introspection "
+                "succeeds but every real call will 404"
+            )
+        return self
+
 
 class ServerConfig(Base):
     name: str

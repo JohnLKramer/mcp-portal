@@ -63,4 +63,10 @@ def build_selection_set(
 ) -> str:
     """Return the `{ ... }` selection-set text for `type_name`, field-tier-filtered."""
     lines = _fields_for(type_name, schema, type_policy, (type_name,), "  ")
+    if not lines:
+        # Every field was excluded by type_policy, or all of them take
+        # arguments the generator cannot supply — an empty `{\n\n}` is
+        # invalid GraphQL, so fall back to the same minimal selection used
+        # for a nested cycle truncation.
+        return "{ __typename }"
     return "{\n" + "\n".join(lines) + "\n}"

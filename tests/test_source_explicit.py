@@ -343,3 +343,34 @@ def test_explicit_source_derived_effect_can_be_overridden_for_graphql_too():
     config = Config.model_validate(payload)
     op = next(iter(ExplicitSource(config).operations()))
     assert op.effect is Effect.IDEMPOTENT_WRITE
+
+
+def test_explicit_source_maps_int_and_list_graphql_types_and_optional_is_not_required():
+    payload = _GRAPHQL_CONFIG.copy()
+    payload["operations"] = [
+        {
+            "id": "list_posts",
+            "upstream": "gql",
+            "description": "List posts.",
+            "binding": {
+                "protocol": "graphql",
+                "operation_type": "query",
+                "document": (
+                    "query ListPosts($limit: Int, $ids: [ID!]) "
+                    "{ posts(limit: $limit, ids: $ids) { id } }"
+                ),
+                "variables": [
+                    {"name": "limit", "graphql_type": "Int", "required": False},
+                    {"name": "ids", "graphql_type": "[ID!]", "required": False},
+                ],
+            },
+        }
+    ]
+    config = Config.model_validate(payload)
+    op = next(iter(ExplicitSource(config).operations()))
+    assert op.input_schema["properties"]["limit"] == {"type": "integer"}
+    assert op.input_schema["properties"]["ids"] == {
+        "type": "array",
+        "items": {"type": "string"},
+    }
+    assert op.input_schema["required"] == []

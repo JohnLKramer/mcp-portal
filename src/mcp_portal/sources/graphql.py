@@ -16,6 +16,7 @@ from mcp_portal.operations import GraphQlBinding, Operation, Sensitivity, Variab
 from mcp_portal.sources.graphql_introspection import (
     FieldInfo,
     IntrospectedSchema,
+    TypeRef,
     named_type,
     render_type_ref,
 )
@@ -35,9 +36,32 @@ def _document(
     return f"{operation_type}{var_decl} {{ {call_with_selection} }}"
 
 
+def _json_type_for(ref: TypeRef) -> dict[str, object]:
+    """Map a GraphQL `TypeRef` to a JSON Schema type fragment.
+
+    `NON_NULL` only affects `required`, not the JSON type, so it unwraps here.
+    Anything other than the recognized scalars (including custom scalars,
+    `ID`, and `String`) falls back to `"string"` — a safe default that at
+    least round-trips through jsonschema without rejecting a valid value.
+    """
+    if ref.kind == "NON_NULL":
+        assert ref.of_type is not None
+        return _json_type_for(ref.of_type)
+    if ref.kind == "LIST":
+        assert ref.of_type is not None
+        return {"type": "array", "items": _json_type_for(ref.of_type)}
+    if ref.name == "Int":
+        return {"type": "integer"}
+    if ref.name == "Float":
+        return {"type": "number"}
+    if ref.name == "Boolean":
+        return {"type": "boolean"}
+    return {"type": "string"}
+
+
 def _input_schema(field: FieldInfo) -> dict[str, object]:
-    properties = {arg.name: {"type": "string"} for arg in field.args}
-    required = [arg.name for arg in field.args]
+    properties = {arg.name: _json_type_for(arg.type) for arg in field.args}
+    required = [arg.name for arg in field.args if arg.type.kind == "NON_NULL"]
     return {"type": "object", "properties": properties, "required": required}
 
 
@@ -107,12 +131,15 @@ class GraphQlSource:
             ),
         )
 
+        description = field.description or field.name
+        title = next(iter(description.splitlines()), field.name)
+
         return Operation(
             id=field.name,
             upstream=self._upstream_key,
             name="",
-            title=field.name,
-            description=field.name,
+            title=title,
+            description=description,
             group_tags=(),
             effect=effect,
             sensitivity=Sensitivity.NORMAL,

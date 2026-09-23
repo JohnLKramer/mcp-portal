@@ -42,6 +42,31 @@ from mcp_portal.sources.flatten import (
 log = logging.getLogger("mcp_portal")
 
 
+def _json_type_for_graphql_type(graphql_type: str) -> dict[str, object]:
+    """Map a rendered GraphQL type string (e.g. `"ID!"`, `"[String]"`,
+    `"Int"`) to a JSON Schema type fragment.
+
+    Hand-authored `operations[]` entries only carry the rendered type text,
+    not a structured `TypeRef`, so this parses it directly rather than
+    reusing `sources/graphql.py`'s `TypeRef`-based mapping. Nullability
+    (a trailing `!`) only affects `required`, not the JSON type, so it is
+    stripped here. Anything other than the recognized scalars falls back to
+    `"string"` — a safe default that at least round-trips through jsonschema.
+    """
+    t = graphql_type.strip()
+    if t.endswith("!"):
+        t = t[:-1]
+    if t.startswith("[") and t.endswith("]"):
+        return {"type": "array", "items": _json_type_for_graphql_type(t[1:-1])}
+    if t == "Int":
+        return {"type": "integer"}
+    if t == "Float":
+        return {"type": "number"}
+    if t == "Boolean":
+        return {"type": "boolean"}
+    return {"type": "string"}
+
+
 def _http_binding(entry: HttpBindingEntry) -> HttpBinding:
     return HttpBinding(
         method=entry.method.upper(),
@@ -108,7 +133,9 @@ class ExplicitSource:
         effect = entry.effect or derived_effect
 
         binding = _graphql_binding(binding_entry)
-        properties = {v.name: {"type": "string"} for v in binding.variables}
+        properties = {
+            v.name: _json_type_for_graphql_type(v.graphql_type) for v in binding.variables
+        }
         required = [v.name for v in binding.variables if v.required]
         input_schema = {"type": "object", "properties": properties, "required": required}
 
