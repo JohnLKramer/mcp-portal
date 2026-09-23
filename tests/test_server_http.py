@@ -13,6 +13,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
+import anyio
 import httpx
 import jwt
 import pytest
@@ -423,3 +424,170 @@ async def test_initialize_issues_a_session_id_reusable_on_a_later_call(
         )
     assert response.status_code == 200
     assert "invoices" in response.text
+
+
+@pytest.mark.anyio
+async def test_a_session_id_is_reusable_across_multiple_tool_calls(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, jwk: dict[str, Any]
+) -> None:
+    async with _client_for(tmp_path, monkeypatch, _config(), handler=_idp_handler(jwk)) as client:
+        session_id = await _initialize(client, MCP_HEADERS)
+        first = await client.post(
+            "/mcp",
+            json=_rpc("tools/call", name="list_invoices", arguments={}),
+            headers=MCP_HEADERS | {"Mcp-Session-Id": session_id},
+        )
+        second = await client.post(
+            "/mcp",
+            json=_rpc("tools/call", name="list_invoices", arguments={}),
+            headers=MCP_HEADERS | {"Mcp-Session-Id": session_id},
+        )
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert "invoices" in first.text
+    assert "invoices" in second.text
+
+
+@pytest.mark.anyio
+async def test_a_session_created_by_one_principal_is_rejected_for_another(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, rsa_key: rsa.RSAPrivateKey, jwk: dict[str, Any]
+) -> None:
+    async with _client_for(
+        tmp_path, monkeypatch, _config(auth=INBOUND), handler=_idp_handler(jwk)
+    ) as client:
+        owner_headers = MCP_HEADERS | {
+            "Authorization": f"Bearer {_bearer(rsa_key, sub='user-123')}"
+        }
+        session_id = await _initialize(client, owner_headers)
+
+        other_headers = MCP_HEADERS | {
+            "Authorization": f"Bearer {_bearer(rsa_key, sub='user-456')}",
+            "Mcp-Session-Id": session_id,
+        }
+        response = await client.post(
+            "/mcp",
+            json=_rpc("tools/call", name="list_invoices", arguments={}),
+            headers=other_headers,
+        )
+    # The SDK's own session manager rejects this before mcp-portal's policy
+    # engine ever runs: "respond exactly as if the session did not exist."
+    assert response.status_code == 404
+
+
+@pytest.mark.anyio
+async def test_an_idle_session_is_evicted_after_the_configured_timeout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, jwk: dict[str, Any]
+) -> None:
+    config = _config(
+        server={
+            "name": "s",
+            "transport": "http",
+            "http": {
+                "allowed_origins": ["https://client.example.com"],
+                "session_idle_timeout_s": 0.05,
+            },
+        }
+    )
+    async with _client_for(tmp_path, monkeypatch, config, handler=_idp_handler(jwk)) as client:
+        session_id = await _initialize(client, MCP_HEADERS)
+        await anyio.sleep(0.2)
+        response = await client.post(
+            "/mcp",
+            json=_rpc("tools/call", name="list_invoices", arguments={}),
+            headers=MCP_HEADERS | {"Mcp-Session-Id": session_id},
+        )
+    assert response.status_code == 404
+
+
+@pytest.mark.anyio
+async def test_new_sessions_are_refused_once_max_sessions_is_reached(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, jwk: dict[str, Any]
+) -> None:
+    config = _config(
+        server={
+            "name": "s",
+            "transport": "http",
+            "http": {"allowed_origins": ["https://client.example.com"], "max_sessions": 1},
+        }
+    )
+    async with _client_for(tmp_path, monkeypatch, config, handler=_idp_handler(jwk)) as client:
+        await _initialize(client, MCP_HEADERS)
+        second = await client.post(
+            "/mcp",
+            json=_rpc(
+                "initialize",
+                protocolVersion="2025-06-18",
+                capabilities={},
+                clientInfo={"name": "test-client", "version": "0.0.1"},
+            ),
+            headers=MCP_HEADERS,
+        )
+    assert second.status_code == 503
+
+
+@pytest.mark.anyio
+async def test_a_get_request_opens_an_sse_stream_for_the_session(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, jwk: dict[str, Any]
+) -> None:
+    """A GET with a live `Mcp-Session-Id` opens an SSE channel: the SDK sends
+    `http.response.start` with `text/event-stream` immediately and then keeps
+    the connection open indefinitely (pings, queued server messages) — it does
+    not complete on its own.
+
+    `httpx.ASGITransport.handle_async_request` (the transport `_client_for`
+    wires up) fully awaits the ASGI app coroutine before it constructs a
+    `Response` at all: `await self.app(scope, receive, send)` completes before
+    any status/headers are handed back, so `client.stream("GET", ...)` never
+    returns for an endless stream — confirmed by reproducing the literal
+    `client.stream(...)` version of this test, which hangs forever. This
+    drives the same ASGI app the fixture builds directly, capturing
+    `http.response.start` the moment it is sent and cancelling the scope
+    right after, which proves the same property (`200` + `text/event-stream`)
+    without depending on the response ever completing.
+    """
+    async with _client_for(tmp_path, monkeypatch, _config(), handler=_idp_handler(jwk)) as client:
+        session_id = await _initialize(client, MCP_HEADERS)
+        asgi_app = client._transport.app  # type: ignore[attr-defined]
+
+        headers_ready = anyio.Event()
+        started: dict[str, Any] = {}
+
+        request_headers = MCP_HEADERS | {"Mcp-Session-Id": session_id, "Host": "127.0.0.1:8443"}
+        scope = {
+            "type": "http",
+            "asgi": {"version": "3.0"},
+            "http_version": "1.1",
+            "method": "GET",
+            "headers": [(k.lower().encode(), v.encode()) for k, v in request_headers.items()],
+            "scheme": "http",
+            "path": "/mcp",
+            "raw_path": b"/mcp",
+            "query_string": b"",
+            "server": ("127.0.0.1", 8443),
+            "client": ("127.0.0.1", 123),
+            "root_path": "",
+        }
+        body_sent = False
+
+        async def receive() -> dict[str, Any]:
+            nonlocal body_sent
+            if not body_sent:
+                body_sent = True
+                return {"type": "http.request", "body": b"", "more_body": False}
+            await anyio.sleep_forever()
+            raise AssertionError("unreachable: sleep_forever never returns")
+
+        async def send(message: dict[str, Any]) -> None:
+            if message["type"] == "http.response.start":
+                started["status"] = message["status"]
+                started["headers"] = {k.decode(): v.decode() for k, v in message.get("headers", [])}
+                headers_ready.set()
+
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(asgi_app, scope, receive, send)
+            with anyio.fail_after(5):
+                await headers_ready.wait()
+            tg.cancel_scope.cancel()
+
+    assert started["status"] == 200
+    assert started["headers"]["content-type"].startswith("text/event-stream")
