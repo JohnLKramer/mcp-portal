@@ -1,0 +1,58 @@
+# A minimal mcp-portal configuration for a GraphQL upstream.
+# Validate with: uv run mcp-portal validate --config examples/graphql.yaml
+#
+# `base_url` and `introspection.graphql.url` are set to the same endpoint on
+# purpose: introspection POSTs to `introspection.graphql.url` at startup, but
+# every real tool call POSTs to `base_url` at runtime. If the two differ,
+# introspection succeeds and every real call 404s — mcp-portal rejects a
+# mismatch at config-load time instead.
+
+version: "1"
+mode: configured
+
+server:
+  name: catalog-portal
+  transport: stdio
+
+upstreams:
+  catalog:
+    base_url: https://api.example.com/graphql
+    timeout_ms: 30000
+    introspection:
+      graphql:
+        url: https://api.example.com/graphql
+        # Field-tier exclusion, keyed by GraphQL type name: fields excluded
+        # here never appear in a generated operation's selection set.
+        type_policy:
+          Product:
+            - internalNotes
+    auth:
+      outbound:
+        mode: static
+        header: Authorization
+        scheme: Bearer
+        # Secrets are references only. A literal here fails to load.
+        value: ${env:CATALOG_API_KEY}
+
+naming:
+  strategy: operation_id
+  prefix_with_group_tag: true
+
+# A hand-authored GraphQL operation, for cases introspection-generated
+# selection can't express (custom arguments, a specific field shape, etc.).
+# `configure` cannot survey or render GraphQL operations yet, so this has to
+# be written by hand rather than produced by `mcp-portal configure`.
+operations:
+  - id: get_product
+    upstream: catalog
+    description: Fetch a product by id.
+    group_tags: [catalog]
+    binding:
+      protocol: graphql
+      operation_type: query
+      document: |
+        query GetProduct($id: ID!) { product(id: $id) { id name price } }
+      variables:
+        - name: id
+          graphql_type: ID!
+          required: true

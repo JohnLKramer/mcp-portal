@@ -55,3 +55,13 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
+
+  graphql-mock:
+    image: graphql-mock:local
+    ports:
+      - "8084:8080"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/healthz')"]
+      interval: 5s
+      timeout: 3s
+      retries: 5

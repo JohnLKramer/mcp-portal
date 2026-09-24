@@ -22,9 +22,7 @@ async def test_the_policy_gated_operation_is_denied_without_the_required_detail(
 ):
     app = build_app(load_config(FIXTURES / "stack-policy-denied.yaml"))
     try:
-        result = await app.invoker.call(
-            "billing_get_customer_tax_id", {"customer_id": "cust_1"}
-        )
+        result = await app.invoker.call("billing_get_customer_tax_id", {"customer_id": "cust_1"})
         assert result.is_error is True
         assert "customer_data" in result.content[0].text
     finally:
@@ -35,9 +33,7 @@ async def test_the_policy_gated_operation_is_denied_without_the_required_detail(
 async def test_an_unmatched_operation_is_allowed_under_the_same_policy(mock_stack: None):
     app = build_app(load_config(FIXTURES / "stack-policy-denied.yaml"))
     try:
-        result = await app.invoker.call(
-            "billing_list_invoices", {"customer_id": "cust_1"}
-        )
+        result = await app.invoker.call("billing_list_invoices", {"customer_id": "cust_1"})
         assert result.is_error is False
         assert "inv_1" in result.content[0].text
     finally:
@@ -50,9 +46,7 @@ async def test_the_policy_gated_operation_is_allowed_with_the_required_detail(
 ):
     app = build_app(load_config(FIXTURES / "stack-policy-authorized.yaml"))
     try:
-        result = await app.invoker.call(
-            "billing_get_customer_tax_id", {"customer_id": "cust_1"}
-        )
+        result = await app.invoker.call("billing_get_customer_tax_id", {"customer_id": "cust_1"})
         assert result.is_error is False
         assert "TAX-CUST-1" in result.content[0].text
     finally:

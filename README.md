@@ -159,11 +159,48 @@ An operation with no `x-mcp-*` extensions is still exposed in
 `introspect-safe`/`introspect-unsafe` mode unless excluded — use
 `x-mcp-exclude: true` to keep it out of the tool registry entirely.
 
+## GraphQL backends
+
+A GraphQL upstream can be introspected the same way an OpenAPI one is:
+
+```yaml
+upstreams:
+  catalog:
+    base_url: https://api.example.com/graphql
+    introspection:
+      graphql:
+        url: https://api.example.com/graphql
+        type_policy:
+          Product: [internalNotes]
+```
+
+One candidate tool is generated per top-level `Query`/`Mutation` field.
+`type_policy` excludes fields from the generated field-selection by GraphQL
+type name; a cycle in the return-type graph stops descending as soon as a
+type reoccurs in its own ancestor chain, falling back to `{ __typename }`.
+Subscriptions are out of scope. `errors` in the response — even under HTTP
+200 — always fails the tool call, there is no partial-success result.
+
+A GraphQL operation can also be hand-authored directly in `operations[]`
+with `binding: { protocol: graphql, ... }`, giving full control over the
+document and selection set. See `examples/graphql.yaml` for a complete,
+runnable example.
+
+Two current limitations:
+
+- `configure` (the interactive CLI) does not survey or render GraphQL
+  operations — hand-author them in `operations[]` for now.
+- `base_url` must be identical to `introspection.graphql.url`. Runtime calls
+  always POST to `base_url`; if it differs from the introspection endpoint,
+  introspection succeeds at startup and every real call 404s. This is
+  enforced as a config-load error.
+
 ## Roadmap
 
 Not implemented yet, tracked in the [design spec](docs/superpowers/specs/2026-09-19-mcp-sidekit-design.md):
 
-- gRPC and GraphQL backends (HTTP/OpenAPI only today)
+- gRPC backend
+- Interactive `configure` support for GraphQL operations
 - JSONPath-based response filtering (byte-size truncation only today)
 - Per-call rate limiting
 

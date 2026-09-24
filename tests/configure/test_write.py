@@ -1,10 +1,19 @@
 import json
 from pathlib import Path
 
+import pytest
+
+from mcp_portal.config.loader import ConfigError
 from mcp_portal.configure.decisions import OperationDecision, RequiredDetail
 from mcp_portal.configure.interaction import ScriptedPrompter
 from mcp_portal.configure.write import render_config, render_policy, write_with_confirmation
-from mcp_portal.operations import Effect, HttpBinding, Operation, Sensitivity
+from mcp_portal.operations import (
+    Effect,
+    GraphQlBinding,
+    HttpBinding,
+    Operation,
+    Sensitivity,
+)
 
 
 def _decision(op_id: str, *, exposed: bool = True, require: RequiredDetail | None = None):
@@ -233,3 +242,27 @@ def test_write_with_confirmation_creates_missing_parent_directories(tmp_path: Pa
 
     assert wrote is True
     assert json.loads(path.read_text()) == {"version": "1"}
+
+
+def test_render_config_raises_config_error_for_a_graphql_binding():
+    op = Operation(
+        id="get_user",
+        upstream="gql",
+        name="get_user",
+        title="get_user",
+        description="Fetch a user by id.",
+        group_tags=(),
+        effect=Effect.READ_ONLY,
+        sensitivity=Sensitivity.NORMAL,
+        input_schema={"type": "object", "properties": {}},
+        binding=GraphQlBinding(
+            operation_type="query",
+            document="query GetUser($id: ID!) { user(id: $id) { id } }",
+            variables=(),
+        ),
+    )
+    decision = OperationDecision(
+        operation=op, exposed=True, effect=op.effect, sensitivity=op.sensitivity, require=None
+    )
+    with pytest.raises(ConfigError, match="GraphQL"):
+        render_config([decision], server_name="s", upstream_base_urls={})

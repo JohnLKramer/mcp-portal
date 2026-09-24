@@ -7,7 +7,15 @@ backward-compatible, so `version: "1"` holds across phases.
 
 from typing import Annotated, Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Discriminator,
+    Field,
+    StringConstraints,
+    Tag,
+    model_validator,
+)
 
 from mcp_portal.naming import NAME_PATTERN
 from mcp_portal.operations import BodyMode, Effect, ParamLocation, Sensitivity
@@ -56,8 +64,23 @@ class OpenApiIntrospectionConfig(Base):
         return self
 
 
+class GraphQlIntrospectionConfig(Base):
+    url: BaseUrl
+    # Field-tier exclusion, keyed by GraphQL type name. Only consulted when
+    # generating a default selection set from introspection — a hand-authored
+    # operations[] entry's document is never touched by this.
+    type_policy: dict[str, list[str]] = Field(default_factory=dict)
+
+
 class IntrospectionConfig(Base):
-    openapi: OpenApiIntrospectionConfig
+    openapi: OpenApiIntrospectionConfig | None = None
+    graphql: GraphQlIntrospectionConfig | None = None
+
+    @model_validator(mode="after")
+    def _exactly_one_protocol(self) -> Self:
+        if (self.openapi is None) == (self.graphql is None):
+            raise ValueError("introspection requires exactly one of 'openapi' or 'graphql'")
+        return self
 
 
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
@@ -147,6 +170,34 @@ class UpstreamConfig(Base):
             )
         return self
 
+    @model_validator(mode="after")
+    def _graphql_introspection_needs_base_url(self) -> Self:
+        if (
+            self.introspection is not None
+            and self.introspection.graphql is not None
+            and self.base_url is None
+        ):
+            raise ValueError(
+                "GraphQL introspection has no server-URL equivalent to OpenAPI's servers[]; "
+                "'base_url' is required alongside 'introspection.graphql'"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _graphql_base_url_matches_introspection(self) -> Self:
+        if (
+            self.introspection is not None
+            and self.introspection.graphql is not None
+            and self.base_url is not None
+            and self.base_url != self.introspection.graphql.url
+        ):
+            raise ValueError(
+                "GraphQL runtime calls are made against 'base_url'; "
+                "'introspection.graphql.url' must match it, or a mismatch means introspection "
+                "succeeds but every real call will 404"
+            )
+        return self
+
 
 class ServerConfig(Base):
     name: str
@@ -176,12 +227,43 @@ class BodyEntry(Base):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
 
-class BindingEntry(Base):
+class HttpBindingEntry(Base):
     protocol: Literal["http"] = "http"
     method: str
     path: str
     parameters: list[ParameterEntry] = Field(default_factory=list)
     body: BodyEntry | None = None
+
+
+class GraphQlVariableEntry(Base):
+    name: str
+    graphql_type: str
+    required: bool = False
+
+
+class GraphQlBindingEntry(Base):
+    protocol: Literal["graphql"] = "graphql"
+    operation_type: Literal["query", "mutation"]
+    document: str
+    variables: list[GraphQlVariableEntry] = Field(default_factory=list)
+
+
+def _binding_protocol(value: Any) -> str:
+    # A plain Field(discriminator="protocol") requires the tag key to be
+    # present in the input; every pre-GraphQL config on disk omits it and
+    # relies on HttpBindingEntry's own `protocol: Literal["http"] = "http"`
+    # default. A callable discriminator keeps that default working by
+    # falling back to "http" when the key is absent, instead of turning
+    # every un-annotated binding into a startup error.
+    if isinstance(value, dict):
+        return str(value.get("protocol", "http"))
+    return str(getattr(value, "protocol", "http"))
+
+
+BindingEntry = Annotated[
+    Annotated[HttpBindingEntry, Tag("http")] | Annotated[GraphQlBindingEntry, Tag("graphql")],
+    Discriminator(_binding_protocol),
+]
 
 
 class OperationEntry(Base):

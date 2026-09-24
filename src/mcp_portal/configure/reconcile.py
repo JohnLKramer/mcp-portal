@@ -6,15 +6,18 @@ schemas are re-confirmed, and unchanged operations are left exactly as
 recorded.
 """
 
+import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from mcp_portal.config.models import Config
+from mcp_portal.config.models import Config, HttpBindingEntry
 from mcp_portal.config.policy import PolicyConfig
 from mcp_portal.configure.decisions import OperationDecision, RequiredDetail, SurveyResult
 from mcp_portal.configure.interaction import Prompter
 from mcp_portal.configure.survey import run_survey
 from mcp_portal.operations import BodySpec, Effect, HttpBinding, Operation, Parameter, Sensitivity
+
+log = logging.getLogger("mcp_portal")
 
 
 def _require_for(
@@ -42,6 +45,13 @@ def decisions_from_config(
     decisions: dict[str, OperationDecision] = {}
     for entry in config.operations:
         binding = entry.binding
+        if not isinstance(binding, HttpBindingEntry):
+            log.warning(
+                "operation %r: skipping reconcile — %s bindings are not yet supported here",
+                entry.id,
+                type(binding).__name__,
+            )
+            continue
         parameters = tuple(
             Parameter(
                 arg=p.arg,

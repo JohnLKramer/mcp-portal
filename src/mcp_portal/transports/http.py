@@ -4,9 +4,7 @@
 boundary where model-supplied values become a real request.
 """
 
-import asyncio
 import json
-import random
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -18,16 +16,14 @@ import httpx
 from mcp_portal.auth.rar import AuthorizationDetail
 from mcp_portal.config.models import UpstreamConfig
 from mcp_portal.operations import BodyMode, Effect, HttpBinding, Operation, ParamLocation
+from mcp_portal.transports.common import (
+    MAX_ATTEMPTS,
+    is_retryable_status,
+    map_body,
+    wait_for_retry,
+)
 
 _CRLF = ("\r", "\n")
-
-RETRYABLE_STATUS = frozenset({502, 503, 504})
-_MAX_ATTEMPTS = 3
-_BACKOFF_BASE_S = 0.1
-_RETRY_AFTER_CAP_S = 10.0
-
-_TEXTUAL_SUFFIXES = ("+json", "+xml")
-_TEXTUAL_TYPES = frozenset({"application/json", "application/xml", "application/yaml"})
 
 
 class RequestBuildError(Exception):
@@ -180,30 +176,6 @@ def build_request(
     return PreparedRequest(method=binding.method, url=url, headers=headers, body=body)
 
 
-def _is_textual(content_type: str) -> bool:
-    """Whether a response body is safe to inline as text.
-
-    An empty content type is treated as textual: httpx.MockTransport and many real
-    APIs omit it on small JSON bodies, and inlining a short unknown body is less
-    harmful than hiding a real one.
-    """
-    if not content_type:
-        return True
-    if content_type.startswith("text/"):
-        return True
-    return content_type in _TEXTUAL_TYPES or content_type.endswith(_TEXTUAL_SUFFIXES)
-
-
-def _retry_delay_s(attempt: int, response: httpx.Response | None) -> float:
-    """How long to wait before the attempt after this one."""
-    if response is not None and response.status_code == 429:
-        header = response.headers.get("retry-after")
-        if header and header.isdigit():
-            return min(float(header), _RETRY_AFTER_CAP_S)
-    backoff = _BACKOFF_BASE_S * (2**attempt)
-    return random.uniform(0, backoff)  # noqa: S311 - jitter, not crypto
-
-
 @dataclass(frozen=True, slots=True)
 class HttpResponse:
     status: int
@@ -227,54 +199,26 @@ class HttpTransport:
         # Retrying a POST after a timeout is how a customer gets charged twice.
         return operation.effect in (Effect.READ_ONLY, Effect.IDEMPOTENT_WRITE)
 
-    def _remaining_s(self, started: float) -> float | None:
-        """Seconds left in the total wall-clock budget, or None when it is unbounded."""
-        budget_ms = self._upstream.max_total_ms
-        if budget_ms is None:
-            return None
-        return budget_ms / 1000 - (time.monotonic() - started)
-
     async def _wait_for_retry(
         self, started: float, attempt: int, response: httpx.Response | None
     ) -> bool:
-        """Wait before the next attempt; False when the budget cannot fund one.
-
-        `timeout_ms` bounds one attempt; `max_total_ms` bounds the retry loop as a
-        whole, so the wait and the attempt it buys have to fit in what is left of
-        the budget together. Asking only whether the budget was already spent let
-        a `Retry-After` of several seconds be slept off against a budget of a few
-        hundred milliseconds, and let three attempts plus backoff hold a caller
-        well past the total the operator configured.
-        """
-        delay = _retry_delay_s(attempt, response)
-        remaining = self._remaining_s(started)
-        # Below the gate `delay` is already strictly under `remaining`, so the
-        # sleep needs no separate clamp: the budget bounds it by construction.
-        if remaining is not None and delay + self._upstream.timeout_ms / 1000 > remaining:
-            return False
-        await asyncio.sleep(delay)
-        return True
+        return await wait_for_retry(
+            started=started,
+            attempt=attempt,
+            response=response,
+            max_total_ms=self._upstream.max_total_ms,
+            per_attempt_timeout_s=self._upstream.timeout_ms / 1000,
+        )
 
     def _map(self, response: httpx.Response) -> HttpResponse:
         raw = response.content
         content_type = response.headers.get("content-type", "").split(";")[0].strip()
-
-        # Binary is described, never inlined: an error path or a stray image
-        # endpoint must not be able to dump base64 into a context window.
-        if not _is_textual(content_type):
-            return HttpResponse(
-                status=response.status_code,
-                text=f"[{len(raw)} bytes of {content_type or 'unknown content type'}, not inlined]",
-                truncated=False,
-                original_bytes=len(raw),
-            )
-
-        cap = self._upstream.max_response_bytes
-        if len(raw) <= cap:
-            return HttpResponse(response.status_code, response.text, False, len(raw))
-        body = raw[:cap].decode(errors="replace")
-        marker = f"\n\n[truncated: {len(raw)} bytes total, {cap} shown]"
-        return HttpResponse(response.status_code, body + marker, True, len(raw))
+        text, truncated = map_body(
+            raw, content_type, self._upstream.max_response_bytes, decoded_text=response.text
+        )
+        return HttpResponse(
+            status=response.status_code, text=text, truncated=truncated, original_bytes=len(raw)
+        )
 
     async def execute(
         self,
@@ -294,7 +238,7 @@ class HttpTransport:
         )
         request = build_request(binding, base_url, arguments, credential)
 
-        attempts = _MAX_ATTEMPTS if self._retryable(operation) else 1
+        attempts = MAX_ATTEMPTS if self._retryable(operation) else 1
         last: httpx.Response | None = None
         started = time.monotonic()
 
@@ -314,7 +258,7 @@ class HttpTransport:
                     raise
                 continue
 
-            retryable = last.status_code in RETRYABLE_STATUS or last.status_code == 429
+            retryable = is_retryable_status(last.status_code)
             if not retryable or attempt == attempts - 1:
                 return self._map(last)
             if not await self._wait_for_retry(started, attempt, last):

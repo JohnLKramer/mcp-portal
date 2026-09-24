@@ -13,49 +13,6 @@
       "title": "AuthConfig",
       "type": "object"
     },
-    "BindingEntry": {
-      "additionalProperties": false,
-      "properties": {
-        "protocol": {
-          "const": "http",
-          "default": "http",
-          "title": "Protocol",
-          "type": "string"
-        },
-        "method": {
-          "title": "Method",
-          "type": "string"
-        },
-        "path": {
-          "title": "Path",
-          "type": "string"
-        },
-        "parameters": {
-          "items": {
-            "$ref": "#/$defs/ParameterEntry"
-          },
-          "title": "Parameters",
-          "type": "array"
-        },
-        "body": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/BodyEntry"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        }
-      },
-      "required": [
-        "method",
-        "path"
-      ],
-      "title": "BindingEntry",
-      "type": "object"
-    },
     "BodyEntry": {
       "additionalProperties": false,
       "properties": {
@@ -132,6 +89,134 @@
       ],
       "title": "Effect",
       "type": "string"
+    },
+    "GraphQlBindingEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol": {
+          "const": "graphql",
+          "default": "graphql",
+          "title": "Protocol",
+          "type": "string"
+        },
+        "operation_type": {
+          "enum": [
+            "query",
+            "mutation"
+          ],
+          "title": "Operation Type",
+          "type": "string"
+        },
+        "document": {
+          "title": "Document",
+          "type": "string"
+        },
+        "variables": {
+          "items": {
+            "$ref": "#/$defs/GraphQlVariableEntry"
+          },
+          "title": "Variables",
+          "type": "array"
+        }
+      },
+      "required": [
+        "operation_type",
+        "document"
+      ],
+      "title": "GraphQlBindingEntry",
+      "type": "object"
+    },
+    "GraphQlIntrospectionConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "url": {
+          "pattern": "^https?://[^/?#\\s]+",
+          "title": "Url",
+          "type": "string"
+        },
+        "type_policy": {
+          "additionalProperties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "title": "Type Policy",
+          "type": "object"
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "title": "GraphQlIntrospectionConfig",
+      "type": "object"
+    },
+    "GraphQlVariableEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "graphql_type": {
+          "title": "Graphql Type",
+          "type": "string"
+        },
+        "required": {
+          "default": false,
+          "title": "Required",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name",
+        "graphql_type"
+      ],
+      "title": "GraphQlVariableEntry",
+      "type": "object"
+    },
+    "HttpBindingEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol": {
+          "const": "http",
+          "default": "http",
+          "title": "Protocol",
+          "type": "string"
+        },
+        "method": {
+          "title": "Method",
+          "type": "string"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "parameters": {
+          "items": {
+            "$ref": "#/$defs/ParameterEntry"
+          },
+          "title": "Parameters",
+          "type": "array"
+        },
+        "body": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BodyEntry"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "method",
+        "path"
+      ],
+      "title": "HttpBindingEntry",
+      "type": "object"
     },
     "HttpServerConfig": {
       "additionalProperties": false,
@@ -277,12 +362,28 @@
       "additionalProperties": false,
       "properties": {
         "openapi": {
-          "$ref": "#/$defs/OpenApiIntrospectionConfig"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OpenApiIntrospectionConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "graphql": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GraphQlIntrospectionConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
-      "required": [
-        "openapi"
-      ],
       "title": "IntrospectionConfig",
       "type": "object"
     },
@@ -482,7 +583,15 @@
           "default": null
         },
         "binding": {
-          "$ref": "#/$defs/BindingEntry"
+          "oneOf": [
+            {
+              "$ref": "#/$defs/HttpBindingEntry"
+            },
+            {
+              "$ref": "#/$defs/GraphQlBindingEntry"
+            }
+          ],
+          "title": "Binding"
         }
       },
       "required": [

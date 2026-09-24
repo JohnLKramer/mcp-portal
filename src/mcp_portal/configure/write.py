@@ -12,6 +12,7 @@ from typing import Any
 
 from ruamel.yaml import YAML
 
+from mcp_portal.config.loader import ConfigError
 from mcp_portal.config.policy import PolicyConfig, PolicyRule
 from mcp_portal.configure.decisions import OperationDecision
 from mcp_portal.configure.interaction import Prompter
@@ -36,8 +37,15 @@ def render_config(
             continue
         op = decision.operation
         if not isinstance(op.binding, HttpBinding):
-            raise TypeError(
-                f"operation {op.id!r} has a non-HTTP binding, which configure cannot render yet"
+            # GraphQL operations are supported at runtime (hand-authored
+            # `operations[]` entries with `protocol: graphql`, or introspected
+            # from `introspection.graphql`), but `configure` cannot yet
+            # survey or render them — the same gap `configure/reconcile.py`
+            # already skips-and-warns on. Fail clearly rather than crash.
+            raise ConfigError(
+                f"operation {op.id!r} uses a GraphQL binding; `configure` cannot render GraphQL "
+                "operations yet — hand-author it in 'operations[]' with 'protocol: graphql' "
+                "instead"
             )
         parameters = [
             {

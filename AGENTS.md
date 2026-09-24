@@ -7,8 +7,15 @@ streamable HTTP to AI clients (Claude Desktop, Claude Code, etc.). Currently
 P4: OpenAPI introspection, `x-mcp-*` opt-in annotations, RAR policy
 enforcement, the HTTP transport, inbound OAuth (JWT validation, JWKS,
 RFC 9728 discovery), and outbound `client_credentials`/`token_exchange` are
-implemented; gRPC/GraphQL backends, JSONPath response filtering, and rate
-limiting are not.
+implemented. GraphQL is also implemented: introspection-based tool
+generation (with a `type_policy` field-exclusion mechanism) and hand-authored
+GraphQL operations via `protocol: graphql` bindings, both dispatched over a
+dedicated GraphQL transport with the same effect-gated retry/backoff and
+wall-clock budget as the HTTP transport. `configure` does not yet render/
+reconcile GraphQL operations (hand-author them in `operations[]`), and a
+GraphQL upstream's `base_url` must match `introspection.graphql.url` (enforced
+at config-load time) since runtime calls always POST to `base_url`. gRPC
+backends, JSONPath response filtering, and rate limiting are not implemented.
 
 **Tech stack:** Python, uv, Pydantic, httpx, ruamel.yaml, jsonschema, the `mcp`
 SDK, pytest, ruff, mypy, Hatchling.
@@ -155,7 +162,7 @@ live in `tests/integration/fixtures/` (`stack.yaml`, `stack-introspection.yaml`,
 | Mock HTTP backends | Flask + `gunicorn` |
 | Mock OAuth IdP | `navikt/mock-oauth2-server` |
 | gRPC | not yet decided — undesigned, see `future-work.md` / design spec §13 |
-| GraphQL | not yet decided — designed at a high level (design spec §15), P6, no library chosen |
+| GraphQL | implemented — hand-rolled introspection + selection-set generation (`sources/graphql*.py`), no client library; see design spec §15 and `docs/superpowers/plans/2026-09-23-mcp-sidekit-graphql-backend.md`. `configure` does not render GraphQL operations yet, and `base_url` must equal `introspection.graphql.url`. |
 | DASH / HLS / QUIC | not yet decided — undesigned, see design spec §13 |
 | Web crawling / resource allow-deny-listing | not yet decided — undesigned, see `future-work.md` |
 

@@ -67,9 +67,33 @@ class HttpBinding:
     protocol: Literal["http"] = "http"
 
 
-# A closed union, discriminated on `protocol`. GrpcBinding and GraphQlBinding join
-# it in later slices; nothing outside transports/ may inspect a binding's internals.
-type Binding = HttpBinding
+@dataclass(frozen=True, slots=True)
+class Variable:
+    """One GraphQL variable's mapping from tool-schema name to the wire type.
+
+    Not a reuse of `Parameter`: `Parameter` carries HTTP-only fields (`location`,
+    `wire_name`, `style`, `explode`) that have no GraphQL meaning, and forcing
+    variables through it would mean either leaving those fields meaningless or
+    unsealing `Parameter` to generalize it. A narrow, protocol-specific type
+    keeps the sealing `Binding` already relies on.
+    """
+
+    name: str
+    graphql_type: str  # e.g. "ID!", "String", "[Int!]"
+    required: bool
+
+
+@dataclass(frozen=True, slots=True)
+class GraphQlBinding:
+    operation_type: Literal["query", "mutation"]
+    document: str  # fixed query/mutation text, hand-authored or generated
+    variables: tuple[Variable, ...] = ()
+    protocol: Literal["graphql"] = "graphql"
+
+
+# A closed union, discriminated on `protocol`. GrpcBinding joins it in a later
+# slice; nothing outside transports/ may inspect a binding's internals.
+type Binding = HttpBinding | GraphQlBinding
 
 
 @dataclass(frozen=True, slots=True)

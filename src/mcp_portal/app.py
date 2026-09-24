@@ -1,12 +1,15 @@
 """Wire a loaded config into a runnable application."""
 
 import logging
+from collections import defaultdict
 from dataclasses import dataclass
+from typing import Any
 
 import httpx
 
 from mcp_portal.auth.outbound import ClientCredentialsSource, TokenExchangeSource, credential_for
 from mcp_portal.auth.principal import Principal, local_principal
+from mcp_portal.auth.rar import AuthorizationDetail
 from mcp_portal.auth.token_cache import TokenCache
 from mcp_portal.config.loader import (
     ConfigError,
@@ -15,15 +18,49 @@ from mcp_portal.config.loader import (
 from mcp_portal.config.policy import PolicyConfig, PolicyDefaults
 from mcp_portal.introspect import introspect_upstreams
 from mcp_portal.naming import NameCollisionError
-from mcp_portal.operations import Effect, Operation
+from mcp_portal.operations import Effect, GraphQlBinding, HttpBinding, Operation
 from mcp_portal.policy import PolicyEngine
 from mcp_portal.registry import build_toolset
 from mcp_portal.server.mcp import ToolInvoker
 from mcp_portal.sources.explicit import ExplicitSource
 from mcp_portal.sources.merge import merge_operations
+from mcp_portal.transports.base import ToolCallResult, TransportAdapter
+from mcp_portal.transports.graphql import GraphQlTransport
 from mcp_portal.transports.http import CredentialSource, HttpTransport, StaticCredentialSource
 
 log = logging.getLogger("mcp_portal")
+
+
+@dataclass(frozen=True, slots=True)
+class _ProtocolRoutingTransport:
+    """Routes each call to the transport matching its operation's binding type.
+
+    Only constructed for an upstream that mixes HTTP and GraphQL operations —
+    they share an outbound credential but not a wire protocol, so `build_app`'s
+    one-transport-per-upstream-key map needs a dispatcher rather than a single
+    concrete transport in that case. An upstream carrying only one binding
+    type still gets its bare concrete transport, unchanged from before.
+    """
+
+    http: HttpTransport
+    graphql: GraphQlTransport
+
+    async def execute(
+        self,
+        operation: Operation,
+        arguments: dict[str, Any],
+        carry: tuple[AuthorizationDetail, ...] = (),
+        subject_token: str | None = None,
+        subject_token_expires_at: int | None = None,
+    ) -> ToolCallResult:
+        if isinstance(operation.binding, GraphQlBinding):
+            return await self.graphql.execute(
+                operation, arguments, carry, subject_token, subject_token_expires_at
+            )
+        assert isinstance(operation.binding, HttpBinding)
+        return await self.http.execute(
+            operation, arguments, carry, subject_token, subject_token_expires_at
+        )
 
 
 @dataclass(slots=True)
@@ -96,9 +133,13 @@ def build_app(loaded: LoadedConfig) -> App:
         # the posture banner for the http path; nothing to log here.
         principal = Principal("local", ())
 
+    binding_types_by_upstream: dict[str, set[type]] = defaultdict(set)
+    for op in toolset.operations:
+        binding_types_by_upstream[op.upstream].add(type(op.binding))
+
     token_cache = TokenCache()
     clients: list[httpx.AsyncClient] = []
-    transports = {}
+    transports: dict[str, TransportAdapter] = {}
     for key, upstream in config.upstreams.items():
         client = httpx.AsyncClient()
         clients.append(client)
@@ -135,11 +176,28 @@ def build_app(loaded: LoadedConfig) -> App:
             )
         else:
             credential_source = StaticCredentialSource(credential_for(outbound, loaded.secrets))
-        transports[key] = HttpTransport(
-            client=client,
-            upstream=upstream.model_copy(update={"base_url": resolved_base_urls[key]}),
-            credential_source=credential_source,
-        )
+
+        resolved_upstream = upstream.model_copy(update={"base_url": resolved_base_urls[key]})
+        binding_types = binding_types_by_upstream.get(key, set())
+        has_http = HttpBinding in binding_types
+        has_graphql = GraphQlBinding in binding_types
+        if has_http and has_graphql:
+            transports[key] = _ProtocolRoutingTransport(
+                http=HttpTransport(
+                    client=client, upstream=resolved_upstream, credential_source=credential_source
+                ),
+                graphql=GraphQlTransport(
+                    client=client, upstream=resolved_upstream, credential_source=credential_source
+                ),
+            )
+        elif has_graphql:
+            transports[key] = GraphQlTransport(
+                client=client, upstream=resolved_upstream, credential_source=credential_source
+            )
+        else:
+            transports[key] = HttpTransport(
+                client=client, upstream=resolved_upstream, credential_source=credential_source
+            )
 
     log.info("serving %d tool(s) from %d upstream(s)", len(toolset.operations), len(transports))
     return App(
