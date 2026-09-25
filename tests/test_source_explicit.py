@@ -3,7 +3,7 @@ import logging
 import pytest
 
 from mcp_portal.config.loader import ConfigError
-from mcp_portal.config.models import Config
+from mcp_portal.config.models import McpPortalConfig
 from mcp_portal.operations import Effect, Sensitivity
 from mcp_portal.sources.explicit import ExplicitSource
 
@@ -16,7 +16,7 @@ BASE: dict = {
 
 
 def build(operations: list[dict]) -> list:
-    config = Config.model_validate(BASE | {"operations": operations})
+    config = McpPortalConfig.model_validate(BASE | {"operations": operations})
     return list(ExplicitSource(config).operations())
 
 

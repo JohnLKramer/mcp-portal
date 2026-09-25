@@ -12,7 +12,7 @@ from pathlib import Path
 import httpx
 
 from mcp_portal.config.loader import ConfigError, credential_headers_for
-from mcp_portal.config.models import HTTP_URL_PATTERN, Config
+from mcp_portal.config.models import HTTP_URL_PATTERN, McpPortalConfig
 from mcp_portal.operations import Operation
 from mcp_portal.sources.openapi import OpenApiSource, load_document
 from mcp_portal.sources.openapi_document import OpenApiError
@@ -21,7 +21,9 @@ from mcp_portal.sources.refs import RefError
 log = logging.getLogger("mcp_portal")
 
 
-def introspect_upstreams(config: Config, base_dir: Path) -> tuple[list[Operation], dict[str, str]]:
+def introspect_upstreams(
+    config: McpPortalConfig, base_dir: Path
+) -> tuple[list[Operation], dict[str, str]]:
     """Returns the introspected operations and each upstream's resolved base
     URL — `base_url` when the operator set one, otherwise the document's own
     `servers[]`."""

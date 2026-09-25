@@ -9,7 +9,7 @@ recorded.
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from mcp_portal.config.models import Config
+from mcp_portal.config.models import McpPortalConfig
 from mcp_portal.config.policy import PolicyConfig
 from mcp_portal.configure.decisions import OperationDecision, RequiredDetail, SurveyResult
 from mcp_portal.configure.interaction import Prompter
@@ -33,7 +33,7 @@ def _require_for(
 
 
 def decisions_from_config(
-    config: Config, policy: PolicyConfig | None
+    config: McpPortalConfig, policy: PolicyConfig | None
 ) -> dict[str, OperationDecision]:
     """Reconstruct the decision that must have produced each recorded
     `OperationEntry`. Every currently-configured operation is, by

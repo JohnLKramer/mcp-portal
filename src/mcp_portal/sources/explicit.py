@@ -11,7 +11,7 @@ from collections.abc import Iterable
 
 from mcp_portal.classify import UnsupportedMethod, effect_for_method
 from mcp_portal.config.loader import ConfigError
-from mcp_portal.config.models import BindingEntry, Config, OperationEntry
+from mcp_portal.config.models import BindingEntry, McpPortalConfig, OperationEntry
 from mcp_portal.operations import (
     BodySpec,
     HttpBinding,
@@ -59,7 +59,7 @@ def _binding(entry: BindingEntry) -> HttpBinding:
 
 
 class ExplicitSource:
-    def __init__(self, config: Config) -> None:
+    def __init__(self, config: McpPortalConfig) -> None:
         self._config = config
 
     def operations(self) -> Iterable[Operation]:

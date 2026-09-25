@@ -4,10 +4,12 @@
       "additionalProperties": false,
       "properties": {
         "local_principal": {
-          "$ref": "#/$defs/LocalPrincipalConfig"
+          "$ref": "#/$defs/LocalPrincipalConfig",
+          "description": "Locally-asserted principal settings."
         },
         "inbound": {
-          "$ref": "#/$defs/InboundAuthConfig"
+          "$ref": "#/$defs/InboundAuthConfig",
+          "description": "Inbound JWT verification settings."
         }
       },
       "title": "AuthConfig",
@@ -19,18 +21,22 @@
         "protocol": {
           "const": "http",
           "default": "http",
+          "description": "Upstream call protocol.",
           "title": "Protocol",
           "type": "string"
         },
         "method": {
+          "description": "HTTP method.",
           "title": "Method",
           "type": "string"
         },
         "path": {
+          "description": "Upstream path.",
           "title": "Path",
           "type": "string"
         },
         "parameters": {
+          "description": "Bound parameters.",
           "items": {
             "$ref": "#/$defs/ParameterEntry"
           },
@@ -46,7 +52,8 @@
               "type": "null"
             }
           ],
-          "default": null
+          "default": null,
+          "description": "Bound request body."
         }
       },
       "required": [
@@ -61,15 +68,18 @@
       "properties": {
         "content_type": {
           "default": "application/json",
+          "description": "Request body content type.",
           "title": "Content Type",
           "type": "string"
         },
         "mode": {
           "$ref": "#/$defs/BodyMode",
-          "default": "flatten"
+          "default": "flatten",
+          "description": "Body construction mode."
         },
         "schema": {
           "additionalProperties": true,
+          "description": "Request body JSON Schema.",
           "title": "Schema",
           "type": "object"
         }
@@ -92,7 +102,8 @@
       "additionalProperties": false,
       "properties": {
         "match": {
-          "$ref": "#/$defs/MatchSpec"
+          "$ref": "#/$defs/MatchSpec",
+          "description": "Match criteria."
         },
         "effect": {
           "anyOf": [
@@ -103,7 +114,8 @@
               "type": "null"
             }
           ],
-          "default": null
+          "default": null,
+          "description": "Effect to assign to matching operations."
         },
         "sensitivity": {
           "anyOf": [
@@ -114,7 +126,8 @@
               "type": "null"
             }
           ],
-          "default": null
+          "default": null,
+          "description": "Sensitivity to assign to matching operations."
         }
       },
       "required": [
@@ -138,11 +151,13 @@
       "properties": {
         "host": {
           "default": "127.0.0.1",
+          "description": "Bind address.",
           "title": "Host",
           "type": "string"
         },
         "port": {
           "default": 8443,
+          "description": "Bind port.",
           "exclusiveMaximum": 65536,
           "exclusiveMinimum": 0,
           "title": "Port",
@@ -150,10 +165,12 @@
         },
         "path": {
           "default": "/mcp",
+          "description": "MCP endpoint path.",
           "title": "Path",
           "type": "string"
         },
         "allowed_origins": {
+          "description": "Allowed Origin header values, for browser cross-origin checks.",
           "items": {
             "type": "string"
           },
@@ -161,6 +178,7 @@
           "type": "array"
         },
         "allowed_hosts": {
+          "description": "Allowed Host header values. Needed behind a reverse proxy or when bound to 0.0.0.0, since no client sends that as its Host header.",
           "items": {
             "type": "string"
           },
@@ -177,6 +195,7 @@
       "properties": {
         "enabled": {
           "default": false,
+          "description": "Inbound JWT verification flag.",
           "title": "Enabled",
           "type": "boolean"
         },
@@ -191,6 +210,7 @@
             }
           ],
           "default": null,
+          "description": "Expected token issuer.",
           "title": "Issuer"
         },
         "audience": {
@@ -203,6 +223,7 @@
             }
           ],
           "default": null,
+          "description": "Expected token audience.",
           "title": "Audience"
         },
         "jwks_uri": {
@@ -216,9 +237,11 @@
             }
           ],
           "default": null,
+          "description": "JWKS endpoint. Discovered automatically from the issuer when omitted.",
           "title": "Jwks Uri"
         },
         "required_scopes": {
+          "description": "Scopes every caller must have.",
           "items": {
             "type": "string"
           },
@@ -226,6 +249,7 @@
           "type": "array"
         },
         "algorithms": {
+          "description": "Accepted JWT signing algorithms.",
           "items": {
             "type": "string"
           },
@@ -234,12 +258,14 @@
         },
         "leeway_s": {
           "default": 60.0,
+          "description": "Clock-skew allowance, in seconds.",
           "minimum": 0,
           "title": "Leeway S",
           "type": "number"
         },
         "allow_unauthenticated_http": {
           "default": false,
+          "description": "Unauthenticated HTTP escape hatch, for non-loopback hosts with no inbound auth.",
           "title": "Allow Unauthenticated Http",
           "type": "boolean"
         }
@@ -251,7 +277,8 @@
       "additionalProperties": false,
       "properties": {
         "openapi": {
-          "$ref": "#/$defs/OpenApiIntrospectionConfig"
+          "$ref": "#/$defs/OpenApiIntrospectionConfig",
+          "description": "OpenAPI introspection settings."
         }
       },
       "required": [
@@ -265,6 +292,7 @@
       "description": "Raw `authorization_details`, parsed into domain objects by\n`auth.principal.local_principal`. Kept as `list[dict]` here rather than\n`config.policy.RequireConfig`'s strict model: a *presented* detail may\ncarry RFC 9396 type-specific extension fields the way a *required* one\nmust not (\u00a75) \u2014 strict rejection is reserved for `require`.",
       "properties": {
         "authorization_details": {
+          "description": "Locally-asserted authorization details: the caller's identity outside the HTTP transport, or HTTP's fallback when inbound auth is disabled.",
           "items": {
             "additionalProperties": true,
             "type": "object"
@@ -280,6 +308,7 @@
       "additionalProperties": false,
       "properties": {
         "ids": {
+          "description": "Operation IDs to match.",
           "items": {
             "type": "string"
           },
@@ -287,6 +316,7 @@
           "type": "array"
         },
         "tags": {
+          "description": "Group tags to match.",
           "items": {
             "type": "string"
           },
@@ -294,6 +324,7 @@
           "type": "array"
         },
         "upstream": {
+          "description": "Upstream names to match.",
           "items": {
             "type": "string"
           },
@@ -301,6 +332,7 @@
           "type": "array"
         },
         "effect": {
+          "description": "Effects to match.",
           "items": {
             "$ref": "#/$defs/Effect"
           },
@@ -316,6 +348,7 @@
       "properties": {
         "strategy": {
           "default": "operation_id",
+          "description": "Tool name generation strategy.",
           "enum": [
             "operation_id",
             "method_path"
@@ -325,11 +358,13 @@
         },
         "prefix_with_group_tag": {
           "default": false,
+          "description": "Group-tag prefix flag.",
           "title": "Prefix With Group Tag",
           "type": "boolean"
         },
         "prefix_with_upstream": {
           "default": false,
+          "description": "Upstream-name prefix flag.",
           "title": "Prefix With Upstream",
           "type": "boolean"
         }
@@ -351,6 +386,7 @@
             }
           ],
           "default": null,
+          "description": "OpenAPI document URL, for fetching over HTTP.",
           "title": "Url"
         },
         "file": {
@@ -363,19 +399,23 @@
             }
           ],
           "default": null,
+          "description": "OpenAPI document path, for loading from disk.",
           "title": "File"
         },
         "include_deprecated": {
           "default": false,
+          "description": "Deprecated-operation inclusion flag.",
           "title": "Include Deprecated",
           "type": "boolean"
         },
         "allow_external_refs": {
           "default": false,
+          "description": "External $ref following flag.",
           "title": "Allow External Refs",
           "type": "boolean"
         },
         "allowed_hosts": {
+          "description": "External $ref host allowlist.",
           "items": {
             "type": "string"
           },
@@ -390,14 +430,17 @@
       "additionalProperties": false,
       "properties": {
         "id": {
+          "description": "Operation ID. The stable identifier for matching; never the tool name.",
           "title": "Id",
           "type": "string"
         },
         "upstream": {
+          "description": "Owning upstream name.",
           "title": "Upstream",
           "type": "string"
         },
         "description": {
+          "description": "Tool description, shown to the model.",
           "title": "Description",
           "type": "string"
         },
@@ -411,6 +454,7 @@
             }
           ],
           "default": null,
+          "description": "Tool title, shown to the model.",
           "title": "Title"
         },
         "name": {
@@ -424,9 +468,11 @@
             }
           ],
           "default": null,
+          "description": "Explicit tool name override.",
           "title": "Name"
         },
         "group_tags": {
+          "description": "Grouping tags.",
           "items": {
             "type": "string"
           },
@@ -442,7 +488,8 @@
               "type": "null"
             }
           ],
-          "default": null
+          "default": null,
+          "description": "Operation effect override."
         },
         "sensitivity": {
           "anyOf": [
@@ -453,10 +500,12 @@
               "type": "null"
             }
           ],
-          "default": null
+          "default": null,
+          "description": "Operation sensitivity override."
         },
         "binding": {
-          "$ref": "#/$defs/BindingEntry"
+          "$ref": "#/$defs/BindingEntry",
+          "description": "Upstream call binding."
         }
       },
       "required": [
@@ -473,6 +522,7 @@
       "properties": {
         "mode": {
           "default": "none",
+          "description": "Outbound credential strategy.",
           "enum": [
             "none",
             "static",
@@ -484,6 +534,7 @@
         },
         "header": {
           "default": "Authorization",
+          "description": "Credential header name.",
           "title": "Header",
           "type": "string"
         },
@@ -497,6 +548,7 @@
             }
           ],
           "default": "Bearer",
+          "description": "Credential header scheme prefix.",
           "title": "Scheme"
         },
         "value": {
@@ -510,6 +562,7 @@
             }
           ],
           "default": null,
+          "description": "Static credential value, for mode 'static'.",
           "title": "Value"
         },
         "token_endpoint": {
@@ -523,6 +576,7 @@
             }
           ],
           "default": null,
+          "description": "OAuth token endpoint, for mode 'client_credentials' or 'token_exchange'.",
           "title": "Token Endpoint"
         },
         "client_id": {
@@ -535,6 +589,7 @@
             }
           ],
           "default": null,
+          "description": "OAuth client ID.",
           "title": "Client Id"
         },
         "client_secret": {
@@ -548,9 +603,11 @@
             }
           ],
           "default": null,
+          "description": "OAuth client secret.",
           "title": "Client Secret"
         },
         "scopes": {
+          "description": "Requested OAuth scopes.",
           "items": {
             "type": "string"
           },
@@ -567,6 +624,7 @@
             }
           ],
           "default": null,
+          "description": "Requested token audience.",
           "title": "Audience"
         },
         "resource": {
@@ -579,10 +637,12 @@
             }
           ],
           "default": null,
+          "description": "Requested token resource indicator.",
           "title": "Resource"
         },
         "requested_token_type": {
           "default": "urn:ietf:params:oauth:token-type:access_token",
+          "description": "Requested token type, for token exchange.",
           "title": "Requested Token Type",
           "type": "string"
         }
@@ -603,11 +663,13 @@
       "additionalProperties": false,
       "properties": {
         "arg": {
+          "description": "Tool argument name.",
           "title": "Arg",
           "type": "string"
         },
         "in": {
-          "$ref": "#/$defs/ParamLocation"
+          "$ref": "#/$defs/ParamLocation",
+          "description": "Parameter location: query, path, or header."
         },
         "wire_name": {
           "anyOf": [
@@ -619,26 +681,31 @@
             }
           ],
           "default": null,
+          "description": "Wire parameter name, if different from the argument name.",
           "title": "Wire Name"
         },
         "required": {
           "default": false,
+          "description": "Required-parameter flag.",
           "title": "Required",
           "type": "boolean"
         },
         "schema": {
           "additionalProperties": true,
+          "description": "Argument JSON Schema.",
           "title": "Schema",
           "type": "object"
         },
         "style": {
           "const": "form",
           "default": "form",
+          "description": "Parameter serialization style.",
           "title": "Style",
           "type": "string"
         },
         "explode": {
           "default": true,
+          "description": "Array/object explode flag.",
           "title": "Explode",
           "type": "boolean"
         }
@@ -654,6 +721,7 @@
       "additionalProperties": false,
       "properties": {
         "file": {
+          "description": "Policy file path.",
           "title": "File",
           "type": "string"
         }
@@ -680,9 +748,11 @@
             }
           ],
           "default": null,
+          "description": "Tags to expose. Omit to expose every tag.",
           "title": "Include Tags"
         },
         "exclude_tags": {
+          "description": "Tags to hide.",
           "items": {
             "type": "string"
           },
@@ -702,9 +772,11 @@
             }
           ],
           "default": null,
+          "description": "Operation IDs to expose. Omit to expose every operation.",
           "title": "Include Ids"
         },
         "exclude_ids": {
+          "description": "Operation IDs to hide.",
           "items": {
             "type": "string"
           },
@@ -728,11 +800,13 @@
       "additionalProperties": false,
       "properties": {
         "name": {
+          "description": "Server name, reported to MCP clients.",
           "title": "Name",
           "type": "string"
         },
         "transport": {
           "default": "stdio",
+          "description": "Transport protocol.",
           "enum": [
             "stdio",
             "http"
@@ -741,7 +815,8 @@
           "type": "string"
         },
         "http": {
-          "$ref": "#/$defs/HttpServerConfig"
+          "$ref": "#/$defs/HttpServerConfig",
+          "description": "HTTP transport settings, used when transport is 'http'."
         }
       },
       "required": [
@@ -754,7 +829,8 @@
       "additionalProperties": false,
       "properties": {
         "outbound": {
-          "$ref": "#/$defs/OutboundConfig"
+          "$ref": "#/$defs/OutboundConfig",
+          "description": "Outbound credential settings."
         }
       },
       "title": "UpstreamAuthConfig",
@@ -766,6 +842,7 @@
         "protocol": {
           "const": "http",
           "default": "http",
+          "description": "Upstream protocol.",
           "title": "Protocol",
           "type": "string"
         },
@@ -780,10 +857,12 @@
             }
           ],
           "default": null,
+          "description": "Upstream base URL.",
           "title": "Base Url"
         },
         "timeout_ms": {
           "default": 30000,
+          "description": "Per-call timeout, in milliseconds.",
           "exclusiveMinimum": 0,
           "title": "Timeout Ms",
           "type": "integer"
@@ -799,16 +878,19 @@
             }
           ],
           "default": null,
+          "description": "Total retry budget, in milliseconds. Defaults to three times timeout_ms.",
           "title": "Max Total Ms"
         },
         "max_response_bytes": {
           "default": 1048576,
+          "description": "Response size cap, in bytes. Larger responses get truncated first.",
           "exclusiveMinimum": 0,
           "title": "Max Response Bytes",
           "type": "integer"
         },
         "auth": {
-          "$ref": "#/$defs/UpstreamAuthConfig"
+          "$ref": "#/$defs/UpstreamAuthConfig",
+          "description": "Upstream authentication settings."
         },
         "introspection": {
           "anyOf": [
@@ -819,7 +901,8 @@
               "type": "null"
             }
           ],
-          "default": null
+          "default": null,
+          "description": "OpenAPI introspection settings, for discovering tools instead of listing them."
         }
       },
       "title": "UpstreamConfig",
@@ -830,10 +913,12 @@
   "properties": {
     "version": {
       "const": "1",
+      "description": "McpPortalConfig schema version.",
       "title": "Version",
       "type": "string"
     },
     "mode": {
+      "description": "Tool source mode.",
       "enum": [
         "configured",
         "introspect-safe",
@@ -844,20 +929,24 @@
     },
     "acknowledge_unsafe": {
       "default": false,
+      "description": "Unsafe-introspection acknowledgement flag, required for 'introspect-unsafe'.",
       "title": "Acknowledge Unsafe",
       "type": "boolean"
     },
     "server": {
-      "$ref": "#/$defs/ServerConfig"
+      "$ref": "#/$defs/ServerConfig",
+      "description": "Server settings."
     },
     "upstreams": {
       "additionalProperties": {
         "$ref": "#/$defs/UpstreamConfig"
       },
+      "description": "Upstreams by name.",
       "title": "Upstreams",
       "type": "object"
     },
     "operations": {
+      "description": "Hand-configured operations.",
       "items": {
         "$ref": "#/$defs/OperationEntry"
       },
@@ -865,6 +954,7 @@
       "type": "array"
     },
     "classification": {
+      "description": "Classification rules.",
       "items": {
         "$ref": "#/$defs/ClassificationRule"
       },
@@ -872,13 +962,16 @@
       "type": "array"
     },
     "selection": {
-      "$ref": "#/$defs/SelectionConfig"
+      "$ref": "#/$defs/SelectionConfig",
+      "description": "Tool selection settings."
     },
     "naming": {
-      "$ref": "#/$defs/NamingConfig"
+      "$ref": "#/$defs/NamingConfig",
+      "description": "Tool naming settings."
     },
     "auth": {
-      "$ref": "#/$defs/AuthConfig"
+      "$ref": "#/$defs/AuthConfig",
+      "description": "Authentication settings."
     },
     "policy": {
       "anyOf": [
@@ -889,7 +982,8 @@
           "type": "null"
         }
       ],
-      "default": null
+      "default": null,
+      "description": "Policy file reference."
     }
   },
   "required": [

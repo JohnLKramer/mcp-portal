@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from mcp_portal.config.models import AuthConfig, Config, OutboundConfig, ServerConfig
+from mcp_portal.config.models import AuthConfig, McpPortalConfig, OutboundConfig, ServerConfig
 
 MINIMAL: dict = {
     "version": "1",
@@ -20,7 +20,7 @@ MINIMAL: dict = {
 
 
 def test_minimal_config_validates():
-    cfg = Config.model_validate(MINIMAL)
+    cfg = McpPortalConfig.model_validate(MINIMAL)
     assert cfg.mode == "configured"
     assert cfg.upstreams["billing"].timeout_ms == 30000
 
@@ -28,26 +28,26 @@ def test_minimal_config_validates():
 def test_mode_is_required_and_has_no_default():
     payload = {k: v for k, v in MINIMAL.items() if k != "mode"}
     with pytest.raises(ValidationError) as exc:
-        Config.model_validate(payload)
+        McpPortalConfig.model_validate(payload)
     assert "mode" in str(exc.value)
 
 
 def test_mode_enum_rejects_anything_outside_the_three_published_values():
     payload = MINIMAL | {"mode": "surveil"}
     with pytest.raises(ValidationError):
-        Config.model_validate(payload)
+        McpPortalConfig.model_validate(payload)
 
 
 def test_unknown_version_is_rejected():
     payload = MINIMAL | {"version": "2"}
     with pytest.raises(ValidationError):
-        Config.model_validate(payload)
+        McpPortalConfig.model_validate(payload)
 
 
 def test_unknown_top_level_field_is_rejected():
     payload = MINIMAL | {"unknown_field": {"file": "./p.yaml"}}
     with pytest.raises(ValidationError) as exc:
-        Config.model_validate(payload)
+        McpPortalConfig.model_validate(payload)
     assert "unknown_field" in str(exc.value)
 
 
@@ -61,7 +61,7 @@ def test_literal_secret_is_rejected():
         }
     }
     with pytest.raises(ValidationError) as exc:
-        Config.model_validate(payload)
+        McpPortalConfig.model_validate(payload)
     assert "value" in str(exc.value)
 
 
@@ -74,7 +74,7 @@ def test_secret_reference_is_accepted():
             }
         }
     }
-    cfg = Config.model_validate(payload)
+    cfg = McpPortalConfig.model_validate(payload)
     outbound = cfg.upstreams["billing"].auth.outbound
     assert outbound.value == "${env:BILLING_KEY}"
     assert outbound.header == "Authorization"
@@ -91,20 +91,20 @@ def test_static_mode_requires_a_value():
         }
     }
     with pytest.raises(ValidationError):
-        Config.model_validate(payload)
+        McpPortalConfig.model_validate(payload)
 
 
 @pytest.mark.parametrize("name", ["List_Invoices", "list invoices", "list!", "", "a" * 65])
 def test_an_explicit_tool_name_outside_the_published_pattern_is_rejected(name: str):
     payload = MINIMAL | {"operations": [MINIMAL["operations"][0] | {"name": name}]}
     with pytest.raises(ValidationError) as exc:
-        Config.model_validate(payload)
+        McpPortalConfig.model_validate(payload)
     assert "name" in str(exc.value)
 
 
 def test_a_well_formed_explicit_tool_name_is_accepted():
     payload = MINIMAL | {"operations": [MINIMAL["operations"][0] | {"name": "invoices_2"}]}
-    assert Config.model_validate(payload).operations[0].name == "invoices_2"
+    assert McpPortalConfig.model_validate(payload).operations[0].name == "invoices_2"
 
 
 @pytest.mark.parametrize(
@@ -113,7 +113,7 @@ def test_a_well_formed_explicit_tool_name_is_accepted():
 def test_a_base_url_that_is_not_an_absolute_http_url_is_rejected(base_url: str):
     payload = MINIMAL | {"upstreams": {"billing": {"base_url": base_url}}}
     with pytest.raises(ValidationError) as exc:
-        Config.model_validate(payload)
+        McpPortalConfig.model_validate(payload)
     assert "base_url" in str(exc.value)
 
 
@@ -123,7 +123,7 @@ def test_a_parameter_style_other_than_form_is_rejected():
     }
     payload = MINIMAL | {"operations": [MINIMAL["operations"][0] | {"binding": binding}]}
     with pytest.raises(ValidationError) as exc:
-        Config.model_validate(payload)
+        McpPortalConfig.model_validate(payload)
     assert "style" in str(exc.value)
 
 
@@ -139,29 +139,31 @@ def test_operation_referencing_an_unknown_upstream_is_rejected():
         ]
     }
     with pytest.raises(ValidationError) as exc:
-        Config.model_validate(payload)
+        McpPortalConfig.model_validate(payload)
     assert "nope" in str(exc.value)
 
 
 def test_introspect_safe_does_not_require_acknowledgement():
-    Config.model_validate(MINIMAL | {"mode": "introspect-safe"})
+    McpPortalConfig.model_validate(MINIMAL | {"mode": "introspect-safe"})
 
 
 def test_introspect_unsafe_without_acknowledgement_is_rejected():
     with pytest.raises(ValidationError) as exc:
-        Config.model_validate(MINIMAL | {"mode": "introspect-unsafe"})
+        McpPortalConfig.model_validate(MINIMAL | {"mode": "introspect-unsafe"})
     assert "acknowledge_unsafe" in str(exc.value)
 
 
 def test_introspect_unsafe_with_acknowledgement_is_accepted():
-    cfg = Config.model_validate(MINIMAL | {"mode": "introspect-unsafe", "acknowledge_unsafe": True})
+    cfg = McpPortalConfig.model_validate(
+        MINIMAL | {"mode": "introspect-unsafe", "acknowledge_unsafe": True}
+    )
     assert cfg.mode == "introspect-unsafe"
 
 
 def test_upstream_with_neither_base_url_nor_introspection_is_rejected():
     payload = MINIMAL | {"mode": "introspect-safe", "upstreams": {"billing": {}}}
     with pytest.raises(ValidationError) as exc:
-        Config.model_validate(payload)
+        McpPortalConfig.model_validate(payload)
     assert "base_url" in str(exc.value) or "introspection" in str(exc.value)
 
 
@@ -174,7 +176,7 @@ def test_upstream_may_rely_on_introspection_instead_of_base_url():
             }
         },
     }
-    cfg = Config.model_validate(payload)
+    cfg = McpPortalConfig.model_validate(payload)
     assert cfg.upstreams["billing"].base_url is None
     assert cfg.upstreams["billing"].introspection.openapi.url == (
         "https://api.example.com/openapi.json"
@@ -190,7 +192,7 @@ def test_configured_mode_requires_base_url_even_when_introspection_is_present():
         }
     }
     with pytest.raises(ValidationError) as exc:
-        Config.model_validate(payload)
+        McpPortalConfig.model_validate(payload)
     assert "configured" in str(exc.value)
 
 
@@ -207,9 +209,9 @@ def test_openapi_introspection_requires_exactly_one_of_url_or_file():
         }
 
     with pytest.raises(ValidationError):
-        Config.model_validate(with_openapi({}))
+        McpPortalConfig.model_validate(with_openapi({}))
     with pytest.raises(ValidationError):
-        Config.model_validate(
+        McpPortalConfig.model_validate(
             with_openapi({"url": "https://api.example.com/openapi.json", "file": "./openapi.json"})
         )
 
@@ -224,14 +226,14 @@ def test_openapi_introspection_defaults():
             }
         },
     }
-    openapi = Config.model_validate(payload).upstreams["billing"].introspection.openapi
+    openapi = McpPortalConfig.model_validate(payload).upstreams["billing"].introspection.openapi
     assert openapi.include_deprecated is False
     assert openapi.allow_external_refs is False
     assert openapi.allowed_hosts == []
 
 
 def test_auth_and_policy_are_both_optional():
-    cfg = Config.model_validate(MINIMAL)
+    cfg = McpPortalConfig.model_validate(MINIMAL)
     assert cfg.auth.local_principal.authorization_details == []
     assert cfg.policy is None
 
@@ -244,18 +246,18 @@ def test_local_principal_accepts_a_list_of_raw_authorization_details():
             }
         }
     }
-    cfg = Config.model_validate(payload)
+    cfg = McpPortalConfig.model_validate(payload)
     assert cfg.auth.local_principal.authorization_details[0]["type"] == "payment_initiation"
 
 
 def test_policy_file_is_a_bare_path_string():
-    cfg = Config.model_validate(MINIMAL | {"policy": {"file": "./rar-policy.yaml"}})
+    cfg = McpPortalConfig.model_validate(MINIMAL | {"policy": {"file": "./rar-policy.yaml"}})
     assert cfg.policy.file == "./rar-policy.yaml"
 
 
 def test_auth_rejects_unknown_fields():
     with pytest.raises(ValidationError):
-        Config.model_validate(MINIMAL | {"auth": {"inbound": {"enabled": True}}})
+        McpPortalConfig.model_validate(MINIMAL | {"auth": {"inbound": {"enabled": True}}})
 
 
 def test_client_credentials_mode_requires_token_endpoint_client_id_and_secret():
@@ -296,7 +298,7 @@ def test_transport_http_defaults_its_own_server_config():
 
 
 def test_inbound_disabled_by_default():
-    cfg = Config.model_validate(MINIMAL)
+    cfg = McpPortalConfig.model_validate(MINIMAL)
     assert cfg.auth.inbound.enabled is False
 
 
@@ -332,7 +334,7 @@ def test_inbound_rejects_none_in_algorithms():
 def test_http_transport_on_a_non_loopback_host_without_inbound_is_a_startup_error():
     payload = MINIMAL | {"server": {"name": "s", "transport": "http", "http": {"host": "0.0.0.0"}}}
     with pytest.raises(ValidationError):
-        Config.model_validate(payload)
+        McpPortalConfig.model_validate(payload)
 
 
 def test_http_transport_on_a_non_loopback_host_with_the_escape_hatch_is_allowed():
@@ -340,12 +342,12 @@ def test_http_transport_on_a_non_loopback_host_with_the_escape_hatch_is_allowed(
         "server": {"name": "s", "transport": "http", "http": {"host": "0.0.0.0"}},
         "auth": {"inbound": {"allow_unauthenticated_http": True}},
     }
-    Config.model_validate(payload)  # does not raise
+    McpPortalConfig.model_validate(payload)  # does not raise
 
 
 def test_http_transport_on_loopback_without_inbound_is_allowed():
     payload = MINIMAL | {"server": {"name": "s", "transport": "http"}}
-    Config.model_validate(payload)  # does not raise
+    McpPortalConfig.model_validate(payload)  # does not raise
 
 
 def test_token_exchange_under_stdio_is_a_startup_error():
@@ -365,7 +367,7 @@ def test_token_exchange_under_stdio_is_a_startup_error():
         }
     }
     with pytest.raises(ValidationError):
-        Config.model_validate(payload)
+        McpPortalConfig.model_validate(payload)
 
 
 def test_token_exchange_with_inbound_disabled_over_http_is_a_startup_error():
@@ -386,7 +388,7 @@ def test_token_exchange_with_inbound_disabled_over_http_is_a_startup_error():
         },
     }
     with pytest.raises(ValidationError):
-        Config.model_validate(payload)
+        McpPortalConfig.model_validate(payload)
 
 
 def test_token_exchange_with_http_and_inbound_enabled_is_valid():
@@ -414,4 +416,4 @@ def test_token_exchange_with_http_and_inbound_enabled_is_valid():
             }
         },
     }
-    Config.model_validate(payload)  # does not raise
+    McpPortalConfig.model_validate(payload)  # does not raise

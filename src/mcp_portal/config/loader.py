@@ -15,7 +15,7 @@ from typing import Any
 from pydantic import ValidationError
 from ruamel.yaml import YAML
 
-from mcp_portal.config.models import SECRET_REF_PATTERN, Config, PolicyFileConfig
+from mcp_portal.config.models import SECRET_REF_PATTERN, McpPortalConfig, PolicyFileConfig
 from mcp_portal.config.policy import PolicyConfig
 from mcp_portal.operations import HttpBinding, Operation, ParamLocation
 
@@ -49,7 +49,7 @@ class ConfigError(Exception):
 
 @dataclass(frozen=True, slots=True)
 class LoadedConfig:
-    config: Config
+    config: McpPortalConfig
     base_dir: Path
     secrets: dict[str, str]
     policy: PolicyConfig | None = None
@@ -88,7 +88,7 @@ def is_denylisted(header: str, extra: frozenset[str]) -> bool:
     )
 
 
-def check_header_denylist(config: Config) -> None:
+def check_header_denylist(config: McpPortalConfig) -> None:
     """Reject bindings that let a caller set a security-relevant header."""
     credential_headers = frozenset(
         u.auth.outbound.header.lower()
@@ -108,7 +108,7 @@ def check_header_denylist(config: Config) -> None:
                 )
 
 
-def credential_headers_for(config: Config) -> frozenset[str]:
+def credential_headers_for(config: McpPortalConfig) -> frozenset[str]:
     return frozenset(
         u.auth.outbound.header.lower()
         for u in config.upstreams.values()
@@ -183,7 +183,7 @@ def load_config(path: Path) -> LoadedConfig:
     raw = _read(path)
 
     try:
-        config = Config.model_validate(raw)
+        config = McpPortalConfig.model_validate(raw)
     except ValidationError as exc:
         raise ConfigError(f"invalid config {path}:\n{exc}") from exc
 

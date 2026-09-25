@@ -1,6 +1,6 @@
 from mcp_portal.config.models import (
     BindingEntry,
-    Config,
+    McpPortalConfig,
     OperationEntry,
     ServerConfig,
     UpstreamConfig,
@@ -27,8 +27,8 @@ def _op(op_id: str, *, path: str = "/x", method: str = "GET") -> Operation:
     )
 
 
-def _config_with(*entries: OperationEntry) -> Config:
-    return Config(
+def _config_with(*entries: OperationEntry) -> McpPortalConfig:
+    return McpPortalConfig(
         version="1",
         mode="introspect-safe",
         server=ServerConfig(name="s", transport="stdio"),

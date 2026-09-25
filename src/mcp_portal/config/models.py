@@ -15,19 +15,12 @@ from mcp_portal.operations import BodyMode, Effect, ParamLocation, Sensitivity
 SECRET_REF_PATTERN = r"^\$\{(env|file):[^}]+\}$"
 
 SecretRef = Annotated[str, StringConstraints(pattern=SECRET_REF_PATTERN)]
-"""A secret-typed field. Only ${env:VAR} and ${file:/path} are permitted.
-
-A literal fails validation rather than warning, so configs are safe to commit by
-construction rather than by discipline.
-"""
+"""Secret reference. Accepts only `${env:VAR}` or `${file:path}`; a literal
+value fails validation, so a config stays safe to commit."""
 
 ToolName = Annotated[str, StringConstraints(pattern=NAME_PATTERN.pattern)]
-"""An explicitly declared tool name. Held to what generate_names would produce.
-
-An explicit name is published verbatim, so it gets the same character set and
-length cap a generated one does rather than being trusted because an operator
-typed it.
-"""
+"""Explicit tool name. Held to the same character set and length limit as a
+generated name, since an explicit name is published verbatim."""
 
 # A schemeless host such as `api.example.com` loads fine and then fails on every
 # call with httpx.UnsupportedProtocol. Requiring the scheme and a non-empty host
@@ -35,7 +28,8 @@ typed it.
 HTTP_URL_PATTERN = r"^https?://[^/?#\s]+"
 
 BaseUrl = Annotated[str, StringConstraints(pattern=HTTP_URL_PATTERN)]
-"""An absolute http(s) base URL. Kept a `str` so path joining stays unsurprising."""
+"""Absolute HTTP(S) base URL, kept as a plain string so path-joining stays
+predictable."""
 
 
 class Base(BaseModel):
@@ -43,11 +37,19 @@ class Base(BaseModel):
 
 
 class OpenApiIntrospectionConfig(Base):
-    url: BaseUrl | None = None
-    file: str | None = None
-    include_deprecated: bool = False
-    allow_external_refs: bool = False
-    allowed_hosts: list[str] = Field(default_factory=list)
+    url: BaseUrl | None = Field(
+        default=None, description="OpenAPI document URL, for fetching over HTTP."
+    )
+    file: str | None = Field(
+        default=None, description="OpenAPI document path, for loading from disk."
+    )
+    include_deprecated: bool = Field(
+        default=False, description="Deprecated-operation inclusion flag."
+    )
+    allow_external_refs: bool = Field(default=False, description="External $ref following flag.")
+    allowed_hosts: list[str] = Field(
+        default_factory=list, description="External $ref host allowlist."
+    )
 
     @model_validator(mode="after")
     def _exactly_one_document_source(self) -> Self:
@@ -57,37 +59,56 @@ class OpenApiIntrospectionConfig(Base):
 
 
 class IntrospectionConfig(Base):
-    openapi: OpenApiIntrospectionConfig
+    openapi: OpenApiIntrospectionConfig = Field(description="OpenAPI introspection settings.")
 
 
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 
 
 class HttpServerConfig(Base):
-    host: str = "127.0.0.1"
-    port: int = Field(default=8443, gt=0, lt=65536)
-    path: str = "/mcp"
-    allowed_origins: list[str] = Field(default_factory=list)
+    host: str = Field(default="127.0.0.1", description="Bind address.")
+    port: int = Field(default=8443, gt=0, lt=65536, description="Bind port.")
+    path: str = Field(default="/mcp", description="MCP endpoint path.")
+    allowed_origins: list[str] = Field(
+        default_factory=list,
+        description="Allowed Origin header values, for browser cross-origin checks.",
+    )
     # The `Host` header values real clients send, which need not be the bind
     # address: behind a reverse proxy, or bound to `0.0.0.0`, no client ever
     # sends `Host: 0.0.0.0`. Without this an operator using the sanctioned
     # non-loopback escape hatch has no way to name their public hostname, and
     # the SDK's DNS-rebinding defense rejects every request with a 421.
-    allowed_hosts: list[str] = Field(default_factory=list)
+    allowed_hosts: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Allowed Host header values. Needed behind a reverse proxy or when "
+            "bound to 0.0.0.0, since no client sends that as its Host header."
+        ),
+    )
 
 
 class OutboundConfig(Base):
-    mode: Literal["none", "static", "client_credentials", "token_exchange"] = "none"
-    header: str = "Authorization"
-    scheme: str | None = "Bearer"
-    value: SecretRef | None = None
-    token_endpoint: BaseUrl | None = None
-    client_id: str | None = None
-    client_secret: SecretRef | None = None
-    scopes: list[str] = Field(default_factory=list)
-    audience: str | None = None
-    resource: str | None = None
-    requested_token_type: str = "urn:ietf:params:oauth:token-type:access_token"
+    mode: Literal["none", "static", "client_credentials", "token_exchange"] = Field(
+        default="none", description="Outbound credential strategy."
+    )
+    header: str = Field(default="Authorization", description="Credential header name.")
+    scheme: str | None = Field(default="Bearer", description="Credential header scheme prefix.")
+    value: SecretRef | None = Field(
+        default=None, description="Static credential value, for mode 'static'."
+    )
+    token_endpoint: BaseUrl | None = Field(
+        default=None,
+        description="OAuth token endpoint, for mode 'client_credentials' or 'token_exchange'.",
+    )
+    client_id: str | None = Field(default=None, description="OAuth client ID.")
+    client_secret: SecretRef | None = Field(default=None, description="OAuth client secret.")
+    scopes: list[str] = Field(default_factory=list, description="Requested OAuth scopes.")
+    audience: str | None = Field(default=None, description="Requested token audience.")
+    resource: str | None = Field(default=None, description="Requested token resource indicator.")
+    requested_token_type: str = Field(
+        default="urn:ietf:params:oauth:token-type:access_token",
+        description="Requested token type, for token exchange.",
+    )
 
     @model_validator(mode="after")
     def _static_needs_a_value(self) -> Self:
@@ -114,17 +135,34 @@ class OutboundConfig(Base):
 
 
 class UpstreamAuthConfig(Base):
-    outbound: OutboundConfig = Field(default_factory=OutboundConfig)
+    outbound: OutboundConfig = Field(
+        default_factory=OutboundConfig, description="Outbound credential settings."
+    )
 
 
 class UpstreamConfig(Base):
-    protocol: Literal["http"] = "http"
-    base_url: BaseUrl | None = None
-    timeout_ms: int = Field(default=30000, gt=0)
-    max_total_ms: int | None = Field(default=None, gt=0)
-    max_response_bytes: int = Field(default=1024 * 1024, gt=0)
-    auth: UpstreamAuthConfig = Field(default_factory=UpstreamAuthConfig)
-    introspection: IntrospectionConfig | None = None
+    protocol: Literal["http"] = Field(default="http", description="Upstream protocol.")
+    base_url: BaseUrl | None = Field(default=None, description="Upstream base URL.")
+    timeout_ms: int = Field(default=30000, gt=0, description="Per-call timeout, in milliseconds.")
+    max_total_ms: int | None = Field(
+        default=None,
+        gt=0,
+        description="Total retry budget, in milliseconds. Defaults to three times timeout_ms.",
+    )
+    max_response_bytes: int = Field(
+        default=1024 * 1024,
+        gt=0,
+        description="Response size cap, in bytes. Larger responses get truncated first.",
+    )
+    auth: UpstreamAuthConfig = Field(
+        default_factory=UpstreamAuthConfig, description="Upstream authentication settings."
+    )
+    introspection: IntrospectionConfig | None = Field(
+        default=None,
+        description=(
+            "OpenAPI introspection settings, for discovering tools instead of listing them."
+        ),
+    )
 
     @model_validator(mode="after")
     def _default_total_budget(self) -> Self:
@@ -143,77 +181,102 @@ class UpstreamConfig(Base):
 
 
 class ServerConfig(Base):
-    name: str
-    transport: Literal["stdio", "http"] = "stdio"
-    http: HttpServerConfig = Field(default_factory=HttpServerConfig)
+    name: str = Field(description="Server name, reported to MCP clients.")
+    transport: Literal["stdio", "http"] = Field(default="stdio", description="Transport protocol.")
+    http: HttpServerConfig = Field(
+        default_factory=HttpServerConfig,
+        description="HTTP transport settings, used when transport is 'http'.",
+    )
 
 
 class ParameterEntry(Base):
-    arg: str
-    location: ParamLocation = Field(alias="in")
-    wire_name: str | None = None
-    required: bool = False
-    schema_: dict[str, Any] = Field(default_factory=lambda: {"type": "string"}, alias="schema")
+    arg: str = Field(description="Tool argument name.")
+    location: ParamLocation = Field(
+        alias="in", description="Parameter location: query, path, or header."
+    )
+    wire_name: str | None = Field(
+        default=None, description="Wire parameter name, if different from the argument name."
+    )
+    required: bool = Field(default=False, description="Required-parameter flag.")
+    schema_: dict[str, Any] = Field(
+        default_factory=lambda: {"type": "string"},
+        alias="schema",
+        description="Argument JSON Schema.",
+    )
     # Only `form` is serialized. Declaring any other OpenAPI style would be
     # accepted and then silently ignored, so the type refuses it instead.
-    style: Literal["form"] = "form"
-    explode: bool = True
+    style: Literal["form"] = Field(default="form", description="Parameter serialization style.")
+    explode: bool = Field(default=True, description="Array/object explode flag.")
 
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
 
 class BodyEntry(Base):
-    content_type: str = "application/json"
-    mode: BodyMode = BodyMode.FLATTEN
-    schema_: dict[str, Any] = Field(alias="schema")
+    content_type: str = Field(default="application/json", description="Request body content type.")
+    mode: BodyMode = Field(default=BodyMode.FLATTEN, description="Body construction mode.")
+    schema_: dict[str, Any] = Field(alias="schema", description="Request body JSON Schema.")
 
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
 
 class BindingEntry(Base):
-    protocol: Literal["http"] = "http"
-    method: str
-    path: str
-    parameters: list[ParameterEntry] = Field(default_factory=list)
-    body: BodyEntry | None = None
+    protocol: Literal["http"] = Field(default="http", description="Upstream call protocol.")
+    method: str = Field(description="HTTP method.")
+    path: str = Field(description="Upstream path.")
+    parameters: list[ParameterEntry] = Field(default_factory=list, description="Bound parameters.")
+    body: BodyEntry | None = Field(default=None, description="Bound request body.")
 
 
 class OperationEntry(Base):
-    id: str
-    upstream: str
-    description: str
-    title: str | None = None
-    name: ToolName | None = None
-    group_tags: list[str] = Field(default_factory=list)
-    effect: Effect | None = None
-    sensitivity: Sensitivity | None = None
-    binding: BindingEntry
+    id: str = Field(
+        description="Operation ID. The stable identifier for matching; never the tool name."
+    )
+    upstream: str = Field(description="Owning upstream name.")
+    description: str = Field(description="Tool description, shown to the model.")
+    title: str | None = Field(default=None, description="Tool title, shown to the model.")
+    name: ToolName | None = Field(default=None, description="Explicit tool name override.")
+    group_tags: list[str] = Field(default_factory=list, description="Grouping tags.")
+    effect: Effect | None = Field(default=None, description="Operation effect override.")
+    sensitivity: Sensitivity | None = Field(
+        default=None, description="Operation sensitivity override."
+    )
+    binding: BindingEntry = Field(description="Upstream call binding.")
 
 
 class MatchSpec(Base):
-    ids: list[str] = Field(default_factory=list)
-    tags: list[str] = Field(default_factory=list)
-    upstream: list[str] = Field(default_factory=list)
-    effect: list[Effect] = Field(default_factory=list)
+    ids: list[str] = Field(default_factory=list, description="Operation IDs to match.")
+    tags: list[str] = Field(default_factory=list, description="Group tags to match.")
+    upstream: list[str] = Field(default_factory=list, description="Upstream names to match.")
+    effect: list[Effect] = Field(default_factory=list, description="Effects to match.")
 
 
 class ClassificationRule(Base):
-    match: MatchSpec
-    effect: Effect | None = None
-    sensitivity: Sensitivity | None = None
+    match: MatchSpec = Field(description="Match criteria.")
+    effect: Effect | None = Field(
+        default=None, description="Effect to assign to matching operations."
+    )
+    sensitivity: Sensitivity | None = Field(
+        default=None, description="Sensitivity to assign to matching operations."
+    )
 
 
 class SelectionConfig(Base):
-    include_tags: list[str] | None = None
-    exclude_tags: list[str] = Field(default_factory=list)
-    include_ids: list[str] | None = None
-    exclude_ids: list[str] = Field(default_factory=list)
+    include_tags: list[str] | None = Field(
+        default=None, description="Tags to expose. Omit to expose every tag."
+    )
+    exclude_tags: list[str] = Field(default_factory=list, description="Tags to hide.")
+    include_ids: list[str] | None = Field(
+        default=None, description="Operation IDs to expose. Omit to expose every operation."
+    )
+    exclude_ids: list[str] = Field(default_factory=list, description="Operation IDs to hide.")
 
 
 class NamingConfig(Base):
-    strategy: Literal["operation_id", "method_path"] = "operation_id"
-    prefix_with_group_tag: bool = False
-    prefix_with_upstream: bool = False
+    strategy: Literal["operation_id", "method_path"] = Field(
+        default="operation_id", description="Tool name generation strategy."
+    )
+    prefix_with_group_tag: bool = Field(default=False, description="Group-tag prefix flag.")
+    prefix_with_upstream: bool = Field(default=False, description="Upstream-name prefix flag.")
 
 
 class LocalPrincipalConfig(Base):
@@ -223,7 +286,13 @@ class LocalPrincipalConfig(Base):
     carry RFC 9396 type-specific extension fields the way a *required* one
     must not (§5) — strict rejection is reserved for `require`."""
 
-    authorization_details: list[dict[str, Any]] = Field(default_factory=list)
+    authorization_details: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description=(
+            "Locally-asserted authorization details: the caller's identity outside "
+            "the HTTP transport, or HTTP's fallback when inbound auth is disabled."
+        ),
+    )
 
 
 class InboundAuthConfig(Base):
@@ -238,14 +307,27 @@ class InboundAuthConfig(Base):
     key-confusion.
     """
 
-    enabled: bool = False
-    issuer: BaseUrl | None = None
-    audience: str | None = None
-    jwks_uri: BaseUrl | None = None
-    required_scopes: list[str] = Field(default_factory=list)
-    algorithms: list[str] = Field(default_factory=lambda: ["RS256", "ES256"])
-    leeway_s: float = Field(default=60.0, ge=0)
-    allow_unauthenticated_http: bool = False
+    enabled: bool = Field(default=False, description="Inbound JWT verification flag.")
+    issuer: BaseUrl | None = Field(default=None, description="Expected token issuer.")
+    audience: str | None = Field(default=None, description="Expected token audience.")
+    jwks_uri: BaseUrl | None = Field(
+        default=None,
+        description="JWKS endpoint. Discovered automatically from the issuer when omitted.",
+    )
+    required_scopes: list[str] = Field(
+        default_factory=list, description="Scopes every caller must have."
+    )
+    algorithms: list[str] = Field(
+        default_factory=lambda: ["RS256", "ES256"],
+        description="Accepted JWT signing algorithms.",
+    )
+    leeway_s: float = Field(default=60.0, ge=0, description="Clock-skew allowance, in seconds.")
+    allow_unauthenticated_http: bool = Field(
+        default=False,
+        description=(
+            "Unauthenticated HTTP escape hatch, for non-loopback hosts with no inbound auth."
+        ),
+    )
 
     @model_validator(mode="after")
     def _enabled_needs_issuer_and_audience(self) -> Self:
@@ -261,26 +343,41 @@ class InboundAuthConfig(Base):
 
 
 class AuthConfig(Base):
-    local_principal: LocalPrincipalConfig = Field(default_factory=LocalPrincipalConfig)
-    inbound: InboundAuthConfig = Field(default_factory=InboundAuthConfig)
+    local_principal: LocalPrincipalConfig = Field(
+        default_factory=LocalPrincipalConfig, description="Locally-asserted principal settings."
+    )
+    inbound: InboundAuthConfig = Field(
+        default_factory=InboundAuthConfig, description="Inbound JWT verification settings."
+    )
 
 
 class PolicyFileConfig(Base):
-    file: str
+    file: str = Field(description="Policy file path.")
 
 
-class Config(Base):
-    version: Literal["1"]
-    mode: Literal["configured", "introspect-safe", "introspect-unsafe"]
-    acknowledge_unsafe: bool = False
-    server: ServerConfig
-    upstreams: dict[str, UpstreamConfig]
-    operations: list[OperationEntry] = Field(default_factory=list)
-    classification: list[ClassificationRule] = Field(default_factory=list)
-    selection: SelectionConfig = Field(default_factory=SelectionConfig)
-    naming: NamingConfig = Field(default_factory=NamingConfig)
-    auth: AuthConfig = Field(default_factory=AuthConfig)
-    policy: PolicyFileConfig | None = None
+class McpPortalConfig(Base):
+    version: Literal["1"] = Field(description="McpPortalConfig schema version.")
+    mode: Literal["configured", "introspect-safe", "introspect-unsafe"] = Field(
+        description="Tool source mode."
+    )
+    acknowledge_unsafe: bool = Field(
+        default=False,
+        description="Unsafe-introspection acknowledgement flag, required for 'introspect-unsafe'.",
+    )
+    server: ServerConfig = Field(description="Server settings.")
+    upstreams: dict[str, UpstreamConfig] = Field(description="Upstreams by name.")
+    operations: list[OperationEntry] = Field(
+        default_factory=list, description="Hand-configured operations."
+    )
+    classification: list[ClassificationRule] = Field(
+        default_factory=list, description="Classification rules."
+    )
+    selection: SelectionConfig = Field(
+        default_factory=SelectionConfig, description="Tool selection settings."
+    )
+    naming: NamingConfig = Field(default_factory=NamingConfig, description="Tool naming settings.")
+    auth: AuthConfig = Field(default_factory=AuthConfig, description="Authentication settings.")
+    policy: PolicyFileConfig | None = Field(default=None, description="Policy file reference.")
 
     @model_validator(mode="after")
     def _operations_reference_known_upstreams(self) -> Self:

@@ -14,7 +14,7 @@ from collections.abc import Iterable, Sequence
 from fnmatch import fnmatch
 from typing import Any
 
-from mcp_portal.config.models import ClassificationRule, Config, MatchSpec, SelectionConfig
+from mcp_portal.config.models import ClassificationRule, MatchSpec, McpPortalConfig, SelectionConfig
 from mcp_portal.naming import NameCollisionError, NamingOptions, generate_names
 from mcp_portal.operations import Effect, Operation, Sensitivity
 
@@ -141,7 +141,7 @@ def _assign_names(selected: Sequence[Operation], options: NamingOptions) -> tupl
     return tuple(dataclasses.replace(op, name=op.name or generated[op.id]) for op in selected)
 
 
-def build_toolset(operations: Iterable[Operation], config: Config) -> ToolSet:
+def build_toolset(operations: Iterable[Operation], config: McpPortalConfig) -> ToolSet:
     classified = _classify(list(operations), config.classification)
     postured = apply_mode_posture(classified, config.mode)
     selected, warnings = _select(postured, config.selection)

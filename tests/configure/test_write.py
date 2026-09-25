@@ -219,10 +219,10 @@ def test_render_config_preserves_parameters_and_body():
     assert binding["parameters"][0]["required"] is True
     assert binding["body"]["schema"]["properties"]["amount"]["type"] == "integer"
 
-    # The rendered dict must actually be loadable as a real Config.
-    from mcp_portal.config.models import Config
+    # The rendered dict must actually be loadable as a real McpPortalConfig.
+    from mcp_portal.config.models import McpPortalConfig
 
-    Config.model_validate(rendered)
+    McpPortalConfig.model_validate(rendered)
 
 
 def test_write_with_confirmation_creates_missing_parent_directories(tmp_path: Path):

@@ -16,7 +16,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from mcp_portal.config.models import Config
+from mcp_portal.config.models import McpPortalConfig
 from mcp_portal.operations import Operation, Sensitivity
 from mcp_portal.registry import apply_mode_posture
 from mcp_portal.sources.openapi import LoadedDocument, OpenApiSource, load_document
@@ -26,7 +26,7 @@ FIXTURES = Path(__file__).parent / "fixtures" / "openapi"
 
 
 def _load(name: str, **overrides) -> tuple[LoadedDocument, dict[str, Operation]]:
-    cfg = Config.model_validate(
+    cfg = McpPortalConfig.model_validate(
         {
             "version": "1",
             "mode": overrides.pop("mode", "introspect-safe"),

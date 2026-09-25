@@ -2,20 +2,23 @@
 
 [Changelog](CHANGELOG.md) · [License](LICENSE) · [Contributing](CONTRIBUTING.md)
 
-Handing an LLM raw API keys or shell access is a gamble. mcp-portal lets you
+Handing an LLM raw API keys or shell access is a gamble. `mcp-portal` lets you
 give AI clients exactly the backend endpoints you choose as MCP tools. Every
-call is checked against an RFC 9396 policy before it reaches your API, and
-your secrets never enter the model's reach.
+call is authorized against an OAuth 2.0 [Rich Authorization Request](https://oauth.net/2/rich-authorization-requests/)
+policy that you build interactively, before it ever reaches your API. Your
+secrets never touch the LLM.
 
 ## Table of Contents
 
 - [Quickstart](#quickstart)
+- [Example configuration](#example-configuration)
 - [Why mcp-portal](#why-mcp-portal)
 - [Build a config interactively (`configure`)](#build-a-config-interactively-configure)
 - [Turn your OpenAPI spec into tools](#turn-your-openapi-spec-into-tools)
 - [Control every call with RAR policy](#control-every-call-with-rar-policy)
 - [Serve over stdio or HTTP](#serve-over-stdio-or-http)
 - [How it works](#how-it-works)
+- [Roadmap](#roadmap)
 - [Development](#development)
 
 ## Quickstart
@@ -45,6 +48,34 @@ Register it with an AI client as a stdio MCP server, e.g. in
 
 See [`examples/billing.yaml`](examples/billing.yaml) for a full commented
 config.
+
+## Example configuration
+
+A minimal config just needs a server and one upstream connection — no
+OpenAPI introspection or RAR policy required to get started:
+
+```yaml
+version: "1"
+mode: configured
+
+server:
+  name: billing-portal
+  transport: stdio
+
+upstreams:
+  billing:
+    base_url: https://api.example.com
+    timeout_ms: 30000
+    auth:
+      outbound:
+        mode: static
+        header: Authorization
+        scheme: Bearer
+        value: ${env:BILLING_API_KEY}   # a reference, never a literal
+```
+
+See [`examples/billing.yaml`](examples/billing.yaml) for the same upstream
+with operations, naming, and classification added.
 
 ## Why mcp-portal
 
@@ -174,6 +205,17 @@ Configs, in JSON or YAML, are validated against
 [`schema/config-v1.schema.json`](schema/config-v1.schema.json), which is
 generated from the Pydantic models via
 `uv run python -m mcp_portal.config.schema`.
+
+## Roadmap
+
+Not implemented yet:
+
+- **gRPC and GraphQL backends** — HTTP/OpenAPI only today.
+- **JSONPath-based response filtering** — byte-size truncation only today.
+- **Per-call rate limiting.**
+- **Setup scripts for Claude Code, Cursor, and GitHub Copilot** — one command
+  to register mcp-portal with each client's config, instead of hand-editing
+  JSON.
 
 ## Development
 
