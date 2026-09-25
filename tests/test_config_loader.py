@@ -11,7 +11,7 @@ from mcp_portal.config.loader import (
     load_policy_file,
     resolve_secret,
 )
-from mcp_portal.config.models import Config, PolicyFileConfig
+from mcp_portal.config.models import McpPortalConfig, PolicyFileConfig
 from mcp_portal.config.policy import PolicyConfig
 from mcp_portal.operations import (
     Effect,
@@ -215,12 +215,12 @@ def test_credential_headers_for_collects_every_configured_outbound_header(
             }
         }
     }
-    cfg = Config.model_validate(payload)
+    cfg = McpPortalConfig.model_validate(payload)
     assert credential_headers_for(cfg) == frozenset({"x-api-key"})
 
 
 def test_credential_headers_for_is_empty_when_no_upstream_configures_static_auth():
-    cfg = Config.model_validate(MINIMAL)
+    cfg = McpPortalConfig.model_validate(MINIMAL)
     assert credential_headers_for(cfg) == frozenset()
 
 

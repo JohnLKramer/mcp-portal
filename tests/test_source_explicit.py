@@ -3,7 +3,7 @@ import logging
 import pytest
 
 from mcp_portal.config.loader import ConfigError
-from mcp_portal.config.models import Config
+from mcp_portal.config.models import McpPortalConfig
 from mcp_portal.operations import Effect, GraphQlBinding, Sensitivity
 from mcp_portal.sources.explicit import ExplicitSource
 
@@ -16,7 +16,7 @@ BASE: dict = {
 
 
 def build(operations: list[dict]) -> list:
-    config = Config.model_validate(BASE | {"operations": operations})
+    config = McpPortalConfig.model_validate(BASE | {"operations": operations})
     return list(ExplicitSource(config).operations())
 
 
@@ -177,9 +177,7 @@ def test_a_path_parameter_with_no_placeholder_is_a_config_error():
                     {
                         "method": "GET",
                         "path": "/v1/invoices",
-                        "parameters": [
-                            {"arg": "invoice_id", "in": "path", "wire_name": "id", "required": True}
-                        ],
+                        "parameters": [{"arg": "invoice_id", "in": "path", "wire_name": "id", "required": True}],
                     }
                 )
             ]
@@ -256,9 +254,7 @@ def test_a_matching_path_template_and_parameter_load_cleanly():
                 {
                     "method": "GET",
                     "path": "/v1/invoices/{id}",
-                    "parameters": [
-                        {"arg": "invoice_id", "in": "path", "wire_name": "id", "required": True}
-                    ],
+                    "parameters": [{"arg": "invoice_id", "in": "path", "wire_name": "id", "required": True}],
                 }
             )
         ]
@@ -328,7 +324,7 @@ _GRAPHQL_CONFIG = {
 
 
 def test_explicit_source_builds_a_graphql_operation():
-    config = Config.model_validate(_GRAPHQL_CONFIG)
+    config = McpPortalConfig.model_validate(_GRAPHQL_CONFIG)
     ops = list(ExplicitSource(config).operations())
     assert len(ops) == 1
     op = ops[0]
@@ -340,7 +336,7 @@ def test_explicit_source_builds_a_graphql_operation():
 def test_explicit_source_derived_effect_can_be_overridden_for_graphql_too():
     payload = _GRAPHQL_CONFIG.copy()
     payload["operations"] = [payload["operations"][0] | {"effect": "idempotent_write"}]
-    config = Config.model_validate(payload)
+    config = McpPortalConfig.model_validate(payload)
     op = next(iter(ExplicitSource(config).operations()))
     assert op.effect is Effect.IDEMPOTENT_WRITE
 
@@ -355,10 +351,7 @@ def test_explicit_source_maps_int_and_list_graphql_types_and_optional_is_not_req
             "binding": {
                 "protocol": "graphql",
                 "operation_type": "query",
-                "document": (
-                    "query ListPosts($limit: Int, $ids: [ID!]) "
-                    "{ posts(limit: $limit, ids: $ids) { id } }"
-                ),
+                "document": ("query ListPosts($limit: Int, $ids: [ID!]) { posts(limit: $limit, ids: $ids) { id } }"),
                 "variables": [
                     {"name": "limit", "graphql_type": "Int", "required": False},
                     {"name": "ids", "graphql_type": "[ID!]", "required": False},
@@ -366,7 +359,7 @@ def test_explicit_source_maps_int_and_list_graphql_types_and_optional_is_not_req
             },
         }
     ]
-    config = Config.model_validate(payload)
+    config = McpPortalConfig.model_validate(payload)
     op = next(iter(ExplicitSource(config).operations()))
     assert op.input_schema["properties"]["limit"] == {"type": "integer"}
     assert op.input_schema["properties"]["ids"] == {

@@ -8,14 +8,14 @@ import json
 from pathlib import Path
 from typing import Any
 
-from mcp_portal.config.models import Config
+from mcp_portal.config.models import McpPortalConfig
 
 SCHEMA_ID = "https://schemas.mcp-portal.dev/config-v1.schema.json"
 SCHEMA_PATH = Path(__file__).resolve().parents[3] / "schema" / "config-v1.schema.json"
 
 
 def config_json_schema() -> dict[str, Any]:
-    schema = Config.model_json_schema(by_alias=True)
+    schema = McpPortalConfig.model_json_schema(by_alias=True)
     schema["$schema"] = "https://json-schema.org/draft/2020-12/schema"
     schema["$id"] = SCHEMA_ID
     schema["title"] = "mcp-portal configuration"

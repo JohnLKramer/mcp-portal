@@ -2,7 +2,7 @@ import dataclasses
 
 import pytest
 
-from mcp_portal.config.models import Config
+from mcp_portal.config.models import McpPortalConfig
 from mcp_portal.naming import NameCollisionError
 from mcp_portal.operations import Effect, HttpBinding, Operation, Sensitivity
 from mcp_portal.registry import build_toolset
@@ -30,8 +30,8 @@ def op(op_id: str, tags: tuple[str, ...] = ("billing",), effect: Effect = Effect
     )
 
 
-def cfg(**overrides) -> Config:
-    return Config.model_validate(BASE | overrides)
+def cfg(**overrides) -> McpPortalConfig:
+    return McpPortalConfig.model_validate(BASE | overrides)
 
 
 def test_names_are_assigned_from_the_surviving_set():

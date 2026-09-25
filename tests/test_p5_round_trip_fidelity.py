@@ -289,7 +289,7 @@ def test_a_lowercase_binding_method_reconciles_as_unchanged(tmp_path: Path) -> N
     """A hand-edited config may spell the method `get`; introspection always
     yields `GET`. Without normalization every operation is "changed" on every
     reconcile run, forever."""
-    from mcp_portal.config.models import Config
+    from mcp_portal.config.models import McpPortalConfig
     from mcp_portal.configure.decisions import OperationDecision
     from mcp_portal.configure.reconcile import decisions_from_config, diff_operation_ids
     from mcp_portal.configure.write import render_config
@@ -324,7 +324,7 @@ upstreams:
     for entry in rendered["operations"]:
         entry["binding"]["method"] = entry["binding"]["method"].lower()
 
-    previous = decisions_from_config(Config.model_validate(rendered), None)
+    previous = decisions_from_config(McpPortalConfig.model_validate(rendered), None)
     report = diff_operation_ids(previous, operations)
 
     assert report.changed == ()
