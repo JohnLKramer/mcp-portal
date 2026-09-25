@@ -17,9 +17,9 @@ from mcp_portal.classify import (
 )
 from mcp_portal.config.loader import ConfigError
 from mcp_portal.config.models import (
-    Config,
     GraphQlBindingEntry,
     HttpBindingEntry,
+    McpPortalConfig,
     OperationEntry,
 )
 from mcp_portal.operations import (
@@ -99,15 +99,12 @@ def _graphql_binding(entry: GraphQlBindingEntry) -> GraphQlBinding:
     return GraphQlBinding(
         operation_type=entry.operation_type,
         document=entry.document,
-        variables=tuple(
-            Variable(name=v.name, graphql_type=v.graphql_type, required=v.required)
-            for v in entry.variables
-        ),
+        variables=tuple(Variable(name=v.name, graphql_type=v.graphql_type, required=v.required) for v in entry.variables),
     )
 
 
 class ExplicitSource:
-    def __init__(self, config: Config) -> None:
+    def __init__(self, config: McpPortalConfig) -> None:
         self._config = config
 
     def operations(self) -> Iterable[Operation]:
@@ -121,9 +118,7 @@ class ExplicitSource:
             return self._build_graphql(entry, entry.binding)
         return self._build_http(entry, entry.binding)
 
-    def _build_graphql(
-        self, entry: OperationEntry, binding_entry: GraphQlBindingEntry
-    ) -> Operation | None:
+    def _build_graphql(self, entry: OperationEntry, binding_entry: GraphQlBindingEntry) -> Operation | None:
         try:
             derived_effect = effect_for_operation_type(binding_entry.operation_type)
         except UnsupportedOperationType:
@@ -133,9 +128,7 @@ class ExplicitSource:
         effect = entry.effect or derived_effect
 
         binding = _graphql_binding(binding_entry)
-        properties = {
-            v.name: _json_type_for_graphql_type(v.graphql_type) for v in binding.variables
-        }
+        properties = {v.name: _json_type_for_graphql_type(v.graphql_type) for v in binding.variables}
         required = [v.name for v in binding.variables if v.required]
         input_schema = {"type": "object", "properties": properties, "required": required}
 
@@ -152,9 +145,7 @@ class ExplicitSource:
             binding=binding,
         )
 
-    def _build_http(
-        self, entry: OperationEntry, binding_entry: HttpBindingEntry
-    ) -> Operation | None:
+    def _build_http(self, entry: OperationEntry, binding_entry: HttpBindingEntry) -> Operation | None:
         binding = _http_binding(binding_entry)
 
         try:

@@ -30,7 +30,7 @@ from mcp_portal.app import App
 from mcp_portal.auth.inbound import InboundAuthError, JwksCache, JwtTokenVerifier, discover_jwks_uri
 from mcp_portal.auth.principal import Principal, local_principal, principal_from_access_token
 from mcp_portal.config.loader import ConfigError
-from mcp_portal.config.models import LOOPBACK_HOSTS, Config, InboundAuthConfig
+from mcp_portal.config.models import LOOPBACK_HOSTS, InboundAuthConfig, McpPortalConfig
 
 log = logging.getLogger("mcp_portal")
 
@@ -79,7 +79,7 @@ class _InboundVerifier(TokenVerifier):
         return await self._verifier.verify_token(token)
 
 
-def _security_settings(config: Config) -> TransportSecuritySettings:
+def _security_settings(config: McpPortalConfig) -> TransportSecuritySettings:
     """Host/Origin allow-lists for the SDK's DNS-rebinding defense.
 
     The Host allow-list has to name how a client *reaches* this server, which
@@ -149,7 +149,7 @@ def _auth_settings(inbound: InboundAuthConfig) -> AuthSettings:
         ) from exc
 
 
-def _principal_for_request(config: Config) -> Principal | None:
+def _principal_for_request(config: McpPortalConfig) -> Principal | None:
     """Resolve the calling principal for one MCP request, or `None` to deny.
 
     With inbound auth enabled the SDK's `RequireAuthMiddleware` has already
@@ -171,7 +171,7 @@ def _principal_for_request(config: Config) -> Principal | None:
     return principal_from_access_token(access_token)
 
 
-def _build_server(app: App, config: Config, verifier: _InboundVerifier | None) -> Server[None]:
+def _build_server(app: App, config: McpPortalConfig, verifier: _InboundVerifier | None) -> Server[None]:
     """The lowlevel server for the HTTP path.
 
     Deliberately not `stdio.build_server`: the SDK captures the handlers in a
@@ -179,21 +179,15 @@ def _build_server(app: App, config: Config, verifier: _InboundVerifier | None) -
     afterwards, and HTTP needs one that resolves a principal per request.
     """
 
-    async def on_list_tools(
-        context: object, params: types.PaginatedRequestParams | None
-    ) -> types.ListToolsResult:
+    async def on_list_tools(context: object, params: types.PaginatedRequestParams | None) -> types.ListToolsResult:
         return types.ListToolsResult(tools=app.invoker.tools())
 
-    async def on_call_tool(
-        context: object, params: types.CallToolRequestParams
-    ) -> types.CallToolResult:
+    async def on_call_tool(context: object, params: types.CallToolRequestParams) -> types.CallToolResult:
         principal = _principal_for_request(config)
         if principal is None:
             # §10: the caller learns that it was denied, never why.
             return types.CallToolResult(
-                content=[
-                    types.TextContent(type="text", text=f"authorization denied for {params.name!r}")
-                ],
+                content=[types.TextContent(type="text", text=f"authorization denied for {params.name!r}")],
                 is_error=True,
             )
         return await app.invoker.call(params.name, params.arguments, principal=principal)
@@ -215,7 +209,7 @@ def _build_server(app: App, config: Config, verifier: _InboundVerifier | None) -
     )
 
 
-def build_http_app(app: App, config: Config, secrets: Mapping[str, str]) -> Starlette:
+def build_http_app(app: App, config: McpPortalConfig, secrets: Mapping[str, str]) -> Starlette:
     """Assemble the ASGI app serving `app` over streamable HTTP.
 
     `secrets` is part of the transport's signature because a transport is
@@ -251,11 +245,7 @@ def build_http_app(app: App, config: Config, secrets: Mapping[str, str]) -> Star
         # (`auth.inbound.enabled=true`); without one there is no
         # `AuthorizationContext` to bind to.
         stateless_http=False,
-        session_idle_timeout=(
-            http.session_idle_timeout_s
-            if http.session_idle_timeout_s is not None
-            else DEFAULT_SESSION_IDLE_TIMEOUT
-        ),
+        session_idle_timeout=(http.session_idle_timeout_s if http.session_idle_timeout_s is not None else DEFAULT_SESSION_IDLE_TIMEOUT),
         max_sessions=http.max_sessions if http.max_sessions is not None else DEFAULT_MAX_SESSIONS,
         transport_security=_security_settings(config),
         auth=_auth_settings(inbound) if verifier is not None else None,

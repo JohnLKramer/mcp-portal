@@ -15,7 +15,12 @@ from typing import Any
 from pydantic import ValidationError
 from ruamel.yaml import YAML
 
-from mcp_portal.config.models import SECRET_REF_PATTERN, Config, HttpBindingEntry, PolicyFileConfig
+from mcp_portal.config.models import (
+    SECRET_REF_PATTERN,
+    HttpBindingEntry,
+    McpPortalConfig,
+    PolicyFileConfig,
+)
 from mcp_portal.config.policy import PolicyConfig
 from mcp_portal.operations import HttpBinding, Operation, ParamLocation
 
@@ -49,7 +54,7 @@ class ConfigError(Exception):
 
 @dataclass(frozen=True, slots=True)
 class LoadedConfig:
-    config: Config
+    config: McpPortalConfig
     base_dir: Path
     secrets: dict[str, str]
     policy: PolicyConfig | None = None
@@ -83,18 +88,12 @@ def resolve_secret(ref: str, base_dir: Path) -> str:
 
 def is_denylisted(header: str, extra: frozenset[str]) -> bool:
     lowered = header.lower()
-    return (
-        lowered in DENYLISTED_HEADERS or lowered in extra or lowered.startswith(DENYLISTED_PREFIXES)
-    )
+    return lowered in DENYLISTED_HEADERS or lowered in extra or lowered.startswith(DENYLISTED_PREFIXES)
 
 
-def check_header_denylist(config: Config) -> None:
+def check_header_denylist(config: McpPortalConfig) -> None:
     """Reject bindings that let a caller set a security-relevant header."""
-    credential_headers = frozenset(
-        u.auth.outbound.header.lower()
-        for u in config.upstreams.values()
-        if u.auth.outbound.mode != "none"
-    )
+    credential_headers = frozenset(u.auth.outbound.header.lower() for u in config.upstreams.values() if u.auth.outbound.mode != "none")
     for op in config.operations:
         binding = op.binding
         if not isinstance(binding, HttpBindingEntry):
@@ -111,17 +110,11 @@ def check_header_denylist(config: Config) -> None:
                 )
 
 
-def credential_headers_for(config: Config) -> frozenset[str]:
-    return frozenset(
-        u.auth.outbound.header.lower()
-        for u in config.upstreams.values()
-        if u.auth.outbound.mode != "none"
-    )
+def credential_headers_for(config: McpPortalConfig) -> frozenset[str]:
+    return frozenset(u.auth.outbound.header.lower() for u in config.upstreams.values() if u.auth.outbound.mode != "none")
 
 
-def check_operation_headers(
-    operations: Iterable[Operation], credential_headers: frozenset[str]
-) -> None:
+def check_operation_headers(operations: Iterable[Operation], credential_headers: frozenset[str]) -> None:
     """The same denylist as `check_header_denylist`, applied to any Operation list.
 
     Explicit entries are checked here a second time as a side effect of the
@@ -186,7 +179,7 @@ def load_config(path: Path) -> LoadedConfig:
     raw = _read(path)
 
     try:
-        config = Config.model_validate(raw)
+        config = McpPortalConfig.model_validate(raw)
     except ValidationError as exc:
         raise ConfigError(f"invalid config {path}:\n{exc}") from exc
 

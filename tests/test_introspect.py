@@ -4,7 +4,7 @@ import httpx
 import pytest
 
 from mcp_portal.config.loader import ConfigError, load_config
-from mcp_portal.config.models import Config
+from mcp_portal.config.models import McpPortalConfig
 from mcp_portal.introspect import introspect_upstreams
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures" / "openapi"
@@ -72,7 +72,7 @@ def test_introspect_upstreams_builds_graphql_operations(tmp_path, monkeypatch):
         return httpx.Response(200, json=_SCHEMA_RESPONSE, request=httpx.Request("POST", url))
 
     monkeypatch.setattr(httpx.Client, "post", fake_client_post)
-    config = Config.model_validate(_GRAPHQL_CONFIG)
+    config = McpPortalConfig.model_validate(_GRAPHQL_CONFIG)
     ops, base_urls = introspect_upstreams(config, tmp_path)
     assert {op.id for op in ops} == {"ping"}
     assert base_urls["gql"] == "https://api.example.com/graphql"
@@ -80,11 +80,9 @@ def test_introspect_upstreams_builds_graphql_operations(tmp_path, monkeypatch):
 
 def test_introspect_upstreams_wraps_a_graphql_introspection_failure(tmp_path, monkeypatch):
     def fake_client_post(self, url, json=None, **kwargs):
-        return httpx.Response(
-            200, json={"errors": [{"message": "nope"}]}, request=httpx.Request("POST", url)
-        )
+        return httpx.Response(200, json={"errors": [{"message": "nope"}]}, request=httpx.Request("POST", url))
 
     monkeypatch.setattr(httpx.Client, "post", fake_client_post)
-    config = Config.model_validate(_GRAPHQL_CONFIG)
+    config = McpPortalConfig.model_validate(_GRAPHQL_CONFIG)
     with pytest.raises(ConfigError, match="nope"):
         introspect_upstreams(config, tmp_path)

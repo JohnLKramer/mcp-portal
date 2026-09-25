@@ -2,7 +2,7 @@ import dataclasses
 
 import pytest
 
-from mcp_portal.config.models import Config
+from mcp_portal.config.models import McpPortalConfig
 from mcp_portal.naming import NameCollisionError
 from mcp_portal.operations import Effect, HttpBinding, Operation, Sensitivity
 from mcp_portal.registry import build_toolset
@@ -30,8 +30,8 @@ def op(op_id: str, tags: tuple[str, ...] = ("billing",), effect: Effect = Effect
     )
 
 
-def cfg(**overrides) -> Config:
-    return Config.model_validate(BASE | overrides)
+def cfg(**overrides) -> McpPortalConfig:
+    return McpPortalConfig.model_validate(BASE | overrides)
 
 
 def test_names_are_assigned_from_the_surviving_set():
@@ -48,9 +48,7 @@ def test_include_tags_is_any_match():
 
 def test_exclusions_win_over_inclusions():
     ops = [op("a", tags=("billing",))]
-    ts = build_toolset(
-        ops, cfg(selection={"include_tags": ["billing"], "exclude_tags": ["billing"]})
-    )
+    ts = build_toolset(ops, cfg(selection={"include_tags": ["billing"], "exclude_tags": ["billing"]}))
     assert ts.operations == ()
 
 
@@ -62,9 +60,7 @@ def test_exclude_ids_supports_globs():
 
 def test_classification_rule_sets_sensitivity_by_id_glob():
     ops = [op("get_user_ssn"), op("list_invoices")]
-    ts = build_toolset(
-        ops, cfg(classification=[{"match": {"ids": ["*_ssn"]}, "sensitivity": "sensitive"}])
-    )
+    ts = build_toolset(ops, cfg(classification=[{"match": {"ids": ["*_ssn"]}, "sensitivity": "sensitive"}]))
     by_id = {o.id: o for o in ts.operations}
     assert by_id["get_user_ssn"].sensitivity is Sensitivity.SENSITIVE
     assert by_id["list_invoices"].sensitivity is Sensitivity.NORMAL
@@ -86,9 +82,7 @@ def test_later_classification_rules_win():
 
 def test_classification_can_override_effect():
     ops = [op("reindex", effect=Effect.IDEMPOTENT_WRITE)]
-    ts = build_toolset(
-        ops, cfg(classification=[{"match": {"ids": ["reindex"]}, "effect": "action"}])
-    )
+    ts = build_toolset(ops, cfg(classification=[{"match": {"ids": ["reindex"]}, "effect": "action"}]))
     assert ts.operations[0].effect is Effect.ACTION
 
 
@@ -165,9 +159,7 @@ def test_introspect_safe_keeps_only_read_only_normal_sensitivity_operations():
 
 
 def test_introspect_safe_excludes_sensitive_read_only_operations():
-    sensitive = dataclasses.replace(
-        op("a", effect=Effect.READ_ONLY), sensitivity=Sensitivity.SENSITIVE
-    )
+    sensitive = dataclasses.replace(op("a", effect=Effect.READ_ONLY), sensitivity=Sensitivity.SENSITIVE)
     ts = build_toolset([sensitive, op("b")], cfg(mode="introspect-safe"))
     assert [o.id for o in ts.operations] == ["b"]
 

@@ -73,9 +73,7 @@ classification:
 """
 
 
-def test_a_rich_config_survives_a_configure_run_untouched(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_a_rich_config_survives_a_configure_run_untouched(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("SOME_TOKEN", "s3cret")
     config_path = tmp_path / "config.yaml"
     config_path.write_text(_rich_config_text())
@@ -99,9 +97,7 @@ def test_a_rich_config_survives_a_configure_run_untouched(
     assert {op.id for op in reloaded.config.operations} == ALL_IDS
 
 
-def test_a_hand_authored_policy_rule_survives_alongside_a_configure_authored_one(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_a_hand_authored_policy_rule_survives_alongside_a_configure_authored_one(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     config_path = tmp_path / "config.yaml"
     config_path.write_text(f"""
 version: "1"
@@ -145,11 +141,7 @@ rules:
     assert main(["configure", "--config", str(config_path), "--policy", str(policy_path)]) == 0
 
     written = _load(policy_path)
-    by_type = {
-        rule["require"]["authorization_details"][0]["type"]: rule
-        for rule in written["rules"]
-        if rule.get("require")
-    }
+    by_type = {rule["require"]["authorization_details"][0]["type"]: rule for rule in written["rules"] if rule.get("require")}
     assert "hand_authored" in by_type, written
     assert by_type["hand_authored"]["match"]["tags"] == ["billing"]
     assert by_type["hand_authored"]["require"]["authorization_details"][0]["actions"] == ["read"]
@@ -157,9 +149,7 @@ rules:
     assert by_type["configure_authored"]["match"]["ids"] == ["create_invoice"]
 
 
-def test_a_deny_default_is_not_silently_reset_to_allow(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_a_deny_default_is_not_silently_reset_to_allow(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     config_path = tmp_path / "config.yaml"
     config_path.write_text(f"""
 version: "1"
@@ -194,9 +184,7 @@ rules:
     assert _load(policy_path)["defaults"]["unmatched"] == "deny"
 
 
-def test_configure_always_writes_mode_configured(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_configure_always_writes_mode_configured(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     config_path = tmp_path / "config.yaml"
     config_path.write_text(f"""
 version: "1"
@@ -218,9 +206,7 @@ upstreams:
     assert load_config(config_path).config.mode == "configured"
 
 
-def test_declined_operations_are_not_served_by_the_built_app(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_declined_operations_are_not_served_by_the_built_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     config_path = tmp_path / "config.yaml"
     config_path.write_text(f"""
 version: "1"
@@ -264,9 +250,7 @@ upstreams:
     assert served == {"list_invoices", "create_invoice"}
 
 
-def test_a_json_config_round_trips_through_configure(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_a_json_config_round_trips_through_configure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("SOME_TOKEN", "s3cret")
     config_path = tmp_path / "config.json"
     config_path.write_text(json.dumps(_yaml.load(_rich_config_text()), indent=2))
@@ -289,7 +273,7 @@ def test_a_lowercase_binding_method_reconciles_as_unchanged(tmp_path: Path) -> N
     """A hand-edited config may spell the method `get`; introspection always
     yields `GET`. Without normalization every operation is "changed" on every
     reconcile run, forever."""
-    from mcp_portal.config.models import Config
+    from mcp_portal.config.models import McpPortalConfig
     from mcp_portal.configure.decisions import OperationDecision
     from mcp_portal.configure.reconcile import decisions_from_config, diff_operation_ids
     from mcp_portal.configure.write import render_config
@@ -324,7 +308,7 @@ upstreams:
     for entry in rendered["operations"]:
         entry["binding"]["method"] = entry["binding"]["method"].lower()
 
-    previous = decisions_from_config(Config.model_validate(rendered), None)
+    previous = decisions_from_config(McpPortalConfig.model_validate(rendered), None)
     report = diff_operation_ids(previous, operations)
 
     assert report.changed == ()
@@ -333,9 +317,7 @@ upstreams:
     assert set(report.unchanged) == {op.id for op in operations}
 
 
-def test_a_second_no_op_configure_run_leaves_the_file_unchanged(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_a_second_no_op_configure_run_leaves_the_file_unchanged(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     config_path = tmp_path / "config.yaml"
     config_path.write_text(f"""
 version: "1"

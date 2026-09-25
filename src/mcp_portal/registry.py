@@ -14,7 +14,7 @@ from collections.abc import Iterable, Sequence
 from fnmatch import fnmatch
 from typing import Any
 
-from mcp_portal.config.models import ClassificationRule, Config, MatchSpec, SelectionConfig
+from mcp_portal.config.models import ClassificationRule, MatchSpec, McpPortalConfig, SelectionConfig
 from mcp_portal.naming import NameCollisionError, NamingOptions, generate_names
 from mcp_portal.operations import Effect, Operation, Sensitivity
 
@@ -63,16 +63,10 @@ def apply_mode_posture(operations: Sequence[Operation], mode: str) -> list[Opera
     """
     if mode != "introspect-safe":
         return list(operations)
-    return [
-        op
-        for op in operations
-        if op.effect is Effect.READ_ONLY and op.sensitivity is Sensitivity.NORMAL
-    ]
+    return [op for op in operations if op.effect is Effect.READ_ONLY and op.sensitivity is Sensitivity.NORMAL]
 
 
-def _select(
-    ops: Sequence[Operation], selection: SelectionConfig
-) -> tuple[list[Operation], list[str]]:
+def _select(ops: Sequence[Operation], selection: SelectionConfig) -> tuple[list[Operation], list[str]]:
     warnings: list[str] = []
     used: set[str] = set()
 
@@ -123,9 +117,7 @@ def _assign_names(selected: Sequence[Operation], options: NamingOptions) -> tupl
     owner: dict[str, str] = {}
     for op in sorted((o for o in selected if o.name), key=lambda o: o.id):
         if op.name in owner:
-            raise NameCollisionError(
-                f"operations {owner[op.name]!r} and {op.id!r} both declare tool name {op.name!r}"
-            )
+            raise NameCollisionError(f"operations {owner[op.name]!r} and {op.id!r} both declare tool name {op.name!r}")
         owner[op.name] = op.id
 
     generated = generate_names([op for op in selected if not op.name], options)
@@ -133,15 +125,14 @@ def _assign_names(selected: Sequence[Operation], options: NamingOptions) -> tupl
         name = generated[op_id]
         if name in owner:
             raise NameCollisionError(
-                f"operation {op_id!r} generates tool name {name!r}, which operation "
-                f"{owner[name]!r} declares explicitly"
+                f"operation {op_id!r} generates tool name {name!r}, which operation {owner[name]!r} declares explicitly"
             )
         owner[name] = op_id
 
     return tuple(dataclasses.replace(op, name=op.name or generated[op.id]) for op in selected)
 
 
-def build_toolset(operations: Iterable[Operation], config: Config) -> ToolSet:
+def build_toolset(operations: Iterable[Operation], config: McpPortalConfig) -> ToolSet:
     classified = _classify(list(operations), config.classification)
     postured = apply_mode_posture(classified, config.mode)
     selected, warnings = _select(postured, config.selection)

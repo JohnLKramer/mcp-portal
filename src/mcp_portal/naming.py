@@ -50,10 +50,7 @@ def _suffix(op_id: str) -> str:
 
 
 def _base_name(op: Operation, options: NamingOptions) -> str:
-    if options.strategy == "method_path" and isinstance(op.binding, HttpBinding):
-        core = f"{op.binding.method}_{op.binding.path}"
-    else:
-        core = op.id
+    core = f"{op.binding.method}_{op.binding.path}" if options.strategy == "method_path" and isinstance(op.binding, HttpBinding) else op.id
 
     parts: list[str] = []
     if options.prefix_with_upstream:

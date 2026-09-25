@@ -9,7 +9,7 @@ import pytest
 from mcp_portal.app import build_app
 from mcp_portal.auth.outbound import ClientCredentialsSource
 from mcp_portal.config.loader import ConfigError, LoadedConfig, load_config
-from mcp_portal.config.models import Config
+from mcp_portal.config.models import McpPortalConfig
 from mcp_portal.operations import GraphQlBinding, HttpBinding
 
 FIXTURES = Path(__file__).parent / "fixtures" / "openapi"
@@ -93,9 +93,7 @@ async def test_tool_schema_reaches_the_client(config_path: Path):
 
 
 @pytest.mark.anyio
-async def test_the_configured_credential_reaches_the_outbound_request(
-    config_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+async def test_the_configured_credential_reaches_the_outbound_request(config_path: Path, monkeypatch: pytest.MonkeyPatch):
     seen: list[httpx.Request] = []
 
     async def handler(request: httpx.Request) -> httpx.Response:
@@ -183,9 +181,7 @@ async def test_a_relative_document_server_url_fails_as_a_config_error(tmp_path: 
             "version": "1",
             "mode": "introspect-safe",
             "server": {"name": "s", "transport": "stdio"},
-            "upstreams": {
-                "billing": {"introspection": {"openapi": {"file": "relative_servers.json"}}}
-            },
+            "upstreams": {"billing": {"introspection": {"openapi": {"file": "relative_servers.json"}}}},
         },
     )
     with pytest.raises(ConfigError, match="not an absolute http"):
@@ -193,9 +189,7 @@ async def test_a_relative_document_server_url_fails_as_a_config_error(tmp_path: 
 
 
 @pytest.mark.anyio
-async def test_mixed_introspected_and_explicit_only_upstreams_both_serve_tools(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+async def test_mixed_introspected_and_explicit_only_upstreams_both_serve_tools(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     # One upstream introspects an OpenAPI document; a second upstream has no
     # introspection at all, only `base_url` and an explicit operation. Both
     # must end up in the final tool set, and calling each tool must reach the
@@ -276,9 +270,7 @@ async def test_build_app_logs_a_banner_for_introspect_unsafe(tmp_path: Path, cap
 
 
 @pytest.mark.anyio
-async def test_build_app_with_no_policy_file_allows_every_call(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+async def test_build_app_with_no_policy_file_allows_every_call(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     # Reuses this file's existing `_write_config`/`CONFIG`-style helper
     # with no `policy` key — behavior must be identical to P1/P2. Exercised
     # through the real `ToolInvoker.call()` path, not by touching internals.
@@ -303,17 +295,9 @@ async def test_build_app_with_no_policy_file_allows_every_call(
     assert result.is_error is False
 
 
-def test_build_app_wires_the_configured_local_principal(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog
-):
+def test_build_app_wires_the_configured_local_principal(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog):
     monkeypatch.setenv("BILLING_KEY", "sk-test")
-    payload = CONFIG | {
-        "auth": {
-            "local_principal": {
-                "authorization_details": [{"type": "payment_initiation", "actions": ["initiate"]}]
-            }
-        }
-    }
+    payload = CONFIG | {"auth": {"local_principal": {"authorization_details": [{"type": "payment_initiation", "actions": ["initiate"]}]}}}
     loaded = load_config(_write_config(tmp_path, payload))
     with caplog.at_level(logging.INFO, logger="mcp_portal"):
         app = build_app(loaded)
@@ -323,9 +307,7 @@ def test_build_app_wires_the_configured_local_principal(
     assert "local principal in effect for stdio" in caplog.text
 
 
-def test_transport_http_defaults_the_invoker_to_a_no_authority_principal(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog
-):
+def test_transport_http_defaults_the_invoker_to_a_no_authority_principal(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog):
     """Under `transport: http` every call resolves its own principal per request,
     so the invoker's instance default is only ever reached by a caller that
     forgot the keyword. That default must therefore carry no authority — the
@@ -334,11 +316,7 @@ def test_transport_http_defaults_the_invoker_to_a_no_authority_principal(
     monkeypatch.setenv("BILLING_KEY", "sk-test")
     payload = CONFIG | {
         "server": {"name": "billing-portal", "transport": "http"},
-        "auth": {
-            "local_principal": {
-                "authorization_details": [{"type": "payment_initiation", "actions": ["initiate"]}]
-            }
-        },
+        "auth": {"local_principal": {"authorization_details": [{"type": "payment_initiation", "actions": ["initiate"]}]}},
     }
     loaded = load_config(_write_config(tmp_path, payload))
     with caplog.at_level(logging.INFO, logger="mcp_portal"):
@@ -349,9 +327,7 @@ def test_transport_http_defaults_the_invoker_to_a_no_authority_principal(
 
 
 @pytest.mark.anyio
-async def test_build_app_wires_a_policy_file_and_enforces_it(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+async def test_build_app_wires_a_policy_file_and_enforces_it(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     # A denied call must never reach the transport — this test does not mock
     # httpx.AsyncClient at all, so if enforcement failed to deny the call and
     # a real request were attempted, it would fail loudly rather than pass
@@ -376,9 +352,7 @@ async def test_build_app_wires_a_policy_file_and_enforces_it(
 
 
 @pytest.mark.anyio
-async def test_client_credentials_upstream_builds_a_dynamic_credential_source(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+async def test_client_credentials_upstream_builds_a_dynamic_credential_source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("BILLING_CLIENT_SECRET", "shh")
     payload = CONFIG | {
         "upstreams": {
@@ -405,9 +379,7 @@ async def test_client_credentials_upstream_builds_a_dynamic_credential_source(
 
 
 @pytest.mark.anyio
-async def test_token_exchange_upstream_builds_a_token_exchange_credential_source(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+async def test_token_exchange_upstream_builds_a_token_exchange_credential_source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("BILLING_CLIENT_SECRET", "secret-value")
     config = CONFIG | {
         "server": {"name": "billing-portal", "transport": "http"},
@@ -438,23 +410,16 @@ async def test_token_exchange_upstream_builds_a_token_exchange_credential_source
     loaded = load_config(_write_config(tmp_path, config))
     app = build_app(loaded)
     try:
-        transport = app.invoker._transports[
-            "billing"
-        ]  # test-only reach-through, matches this file's existing style
+        transport = app.invoker._transports["billing"]  # test-only reach-through, matches this file's existing style
         assert isinstance(transport._credential_source, TokenExchangeSource)
     finally:
         await app.aclose()
 
 
-def test_build_app_logs_a_dead_policy_rule_warning(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog
-):
+def test_build_app_logs_a_dead_policy_rule_warning(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog):
     monkeypatch.setenv("BILLING_KEY", "sk-test")
     (tmp_path / "rar-policy.yaml").write_text(
-        "version: '1'\n"
-        "rules:\n"
-        "  - match: {tags: [nonexistent]}\n"
-        "    require: {authorization_details: [{type: x}]}\n"
+        "version: '1'\nrules:\n  - match: {tags: [nonexistent]}\n    require: {authorization_details: [{type: x}]}\n"
     )
     payload = CONFIG | {"policy": {"file": "./rar-policy.yaml"}}
     with caplog.at_level(logging.WARNING, logger="mcp_portal"):
@@ -508,22 +473,16 @@ async def test_build_app_dispatches_by_binding_type_within_one_upstream(
         lambda **kw: real_client(transport=httpx.MockTransport(handler), **kw),
     )
 
-    config = Config.model_validate(_MIXED_CONFIG)
+    config = McpPortalConfig.model_validate(_MIXED_CONFIG)
     loaded = LoadedConfig(config=config, secrets={}, base_dir=None, policy=None)
     app = build_app(loaded)
     try:
-        http_op = next(
-            op for op in app.invoker._toolset.operations if isinstance(op.binding, HttpBinding)
-        )
-        graphql_op = next(
-            op for op in app.invoker._toolset.operations if isinstance(op.binding, GraphQlBinding)
-        )
+        http_op = next(op for op in app.invoker._toolset.operations if isinstance(op.binding, HttpBinding))
+        graphql_op = next(op for op in app.invoker._toolset.operations if isinstance(op.binding, GraphQlBinding))
         # One transport object serves both operations' upstream key ("mixed"),
         # confirming build_app didn't need a second map entry to hold both
         # protocols for a single upstream.
-        assert app.invoker._transports.get(http_op.upstream) is app.invoker._transports.get(
-            graphql_op.upstream
-        )
+        assert app.invoker._transports.get(http_op.upstream) is app.invoker._transports.get(graphql_op.upstream)
 
         http_result = await app.invoker.call(http_op.name, {})
         graphql_result = await app.invoker.call(graphql_op.name, {"id": "1"})

@@ -1,6 +1,6 @@
 from mcp_portal.config.models import (
-    Config,
     HttpBindingEntry,
+    McpPortalConfig,
     OperationEntry,
     ServerConfig,
     UpstreamConfig,
@@ -27,8 +27,8 @@ def _op(op_id: str, *, path: str = "/x", method: str = "GET") -> Operation:
     )
 
 
-def _config_with(*entries: OperationEntry) -> Config:
-    return Config(
+def _config_with(*entries: OperationEntry) -> McpPortalConfig:
+    return McpPortalConfig(
         version="1",
         mode="introspect-safe",
         server=ServerConfig(name="s", transport="stdio"),
@@ -203,11 +203,7 @@ def test_decisions_from_config_reconstructs_require_from_a_tag_matched_policy_ru
             PolicyRule(
                 match=PolicyMatchSpec(tags=["billing"]),
                 require=RequireConfig(
-                    authorization_details=[
-                        AuthorizationDetailRequirement(
-                            type="payment_initiation", actions=["initiate"]
-                        )
-                    ]
+                    authorization_details=[AuthorizationDetailRequirement(type="payment_initiation", actions=["initiate"])]
                 ),
             )
         ],
@@ -233,11 +229,7 @@ def test_a_parameter_schema_change_is_classified_as_changed():
         binding=HttpBindingEntry(
             method="GET",
             path="/invoices/{id}",
-            parameters=[
-                ParameterEntry(
-                    arg="id", location=ParamLocation.PATH, required=True, schema={"type": "string"}
-                )
-            ],
+            parameters=[ParameterEntry(arg="id", location=ParamLocation.PATH, required=True, schema={"type": "string"})],
         ),
     )
     previous = decisions_from_config(_config_with(entry), None)

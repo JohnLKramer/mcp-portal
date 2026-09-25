@@ -1,93 +1,25 @@
 # mcp-portal
 
-mcp-portal is an MCP gateway for HTTP/OpenAPI backends. Instead of giving an
-LLM raw system or API access, it exposes specific, opted-in backend endpoints
-as structured MCP tools.
+[Changelog](CHANGELOG.md) · [License](LICENSE) · [Contributing](CONTRIBUTING.md)
 
-**Status: P5.** OpenAPI introspection, opt-in exposure via `x-mcp-*`
-extensions, RAR (RFC 9396) policy enforcement, outbound `client_credentials`
-and `token_exchange` auth, the streamable HTTP transport (with stateful
-sessions and SSE), inbound OAuth (JWT validation, JWKS, RFC 9728 discovery),
-and an interactive `configure` command for authoring and reconciling a
-config are implemented — servable over stdio or HTTP. Non-HTTP backends are
-not implemented — see [Roadmap](#roadmap) and the
-[design spec](docs/superpowers/specs/2026-09-19-mcp-sidekit-design.md).
+Handing an LLM raw API keys or shell access is a gamble. `mcp-portal` lets you
+give AI clients exactly the backend endpoints you choose as MCP tools. Every
+call is authorized against an OAuth 2.0 [Rich Authorization Request](https://oauth.net/2/rich-authorization-requests/)
+policy that you build interactively, before it ever reaches your API. Your
+secrets never touch the LLM.
 
-## Key benefits
+## Table of Contents
 
-- **Central access control** — every tool call passes through one gateway,
-  authorized by an RAR policy evaluated against a locally-asserted principal.
-- **Dynamic tool generation from OpenAPI** — point mcp-portal at an OpenAPI
-  3.0/3.1 document and its operations become MCP tools, no hand-written tool
-  code required.
-- **Explicit opt-in exposure** — an operation is only exposed, or exposed with
-  restrictions, because an `x-mcp-*` extension or explicit config entry says
-  so. Nothing is exposed by accident.
-- **Response size capping** — oversized upstream responses are truncated with
-  an explicit marker stating that truncation happened and the original size,
-  so a large response can't blow out an LLM's context window.
-- **Config fails fast** — `validate` catches bad config, missing secrets, and
-  policy problems before the server starts; failures never surface mid-call.
-
-## How it works
-
-```
-AI Client  --stdio-->  mcp-portal (Gateway)  --HTTP-->  OpenAPI backend
-```
-
-The gateway loads a config, builds its tool registry from explicit config
-entries and/or OpenAPI introspection, evaluates each call against RAR policy,
-then forwards it to the upstream over HTTP.
-
-## Core features
-
-- **Dynamic tool generation** — `configured` mode uses explicit config
-  entries; `introspect-safe`/`introspect-unsafe` modes derive tools from a
-  live OpenAPI document (`sources/openapi.py`).
-- **Opt-in security via `x-mcp-*`** — `x-mcp-exclude`, `x-mcp-sensitive`,
-  `x-mcp-name`, `x-mcp-title`, and `x-mcp-description` control whether and how
-  an introspected operation is exposed.
-- **RAR policy enforcement** — policy rules match operations by `id`, `tags`,
-  `upstream`, `effect`, and `sensitivity`, accumulate `require`d
-  `authorization_details`, and are checked against the calling principal
-  before the upstream is ever invoked.
-- **Two risk axes per operation** — `effect` (`read_only` / `idempotent_write`
-  / `action`) is derived from the HTTP method and gates automatic retries;
-  `sensitivity` (`normal` / `sensitive`) is set explicitly via classification
-  rules, never derived.
-- **Secrets stay out of config and out of the model's reach** — every secret
-  field is a `${env:VAR}` or `${file:path}` reference, never a literal; a
-  denylist blocks bindings that would let a model supply `Authorization`,
-  `Host`, `Cookie`, or `X-Forwarded-*` headers.
-- **HTTP transport for the gateway itself** — `transport: http` serves over
-  the `mcp` SDK's streamable HTTP transport: `Mcp-Session-Id` sessions and
-  `GET`/SSE streaming, the Origin/Host DNS-rebinding defense, and RFC 9728
-  protected-resource metadata are all built in. A session is bound to the
-  bearer principal that created it — a mismatched reuse is rejected, never
-  silently mixed (when `auth.inbound.enabled: true`; without inbound auth,
-  sessions aren't bound to any principal, consistent with that mode's
-  existing guardrail-not-boundary status). Clients must complete the MCP
-  `initialize` handshake before any other call — a client that sends
-  `tools/call` first now gets a `400` — and because session state lives in
-  process memory, multiple gateway replicas behind a non-sticky load balancer
-  will see intermittent session-not-found errors (horizontal scaling is out
-  of scope, per the design spec).
-- **Inbound OAuth and outbound `client_credentials`/`token_exchange`** —
-  under `transport: http`, `auth.inbound` validates the caller's own bearer
-  JWT (RFC 9068, JWKS-backed) and evaluates RAR policy against its
-  `authorization_details` claim; an upstream configured with
-  `outbound.mode: token_exchange` then exchanges that same token (RFC 8693)
-  for its own credential, carrying only the policy's required detail — never
-  the caller's whole presented set — when a matching rule sets
-  `outbound.carry: true`.
-- **Interactive `configure` command** — introspects an upstream and walks you
-  through a survey of which operations to expose, proposing sensible
-  defaults so you're confirming rather than answering from scratch. It shows
-  you the config and policy diff and only writes after you confirm. Run it
-  again after the upstream API changes and it reconciles instead of
-  re-asking everything: new operations get surveyed, removed ones are called
-  out instead of silently dropped, changed operations get re-confirmed, and
-  everything else is left exactly as it was.
+- [Quickstart](#quickstart)
+- [Example configuration](#example-configuration)
+- [Why mcp-portal](#why-mcp-portal)
+- [Build a config interactively (`configure`)](#build-a-config-interactively-configure)
+- [Turn your OpenAPI spec into tools](#turn-your-openapi-spec-into-tools)
+- [Control every call with RAR policy](#control-every-call-with-rar-policy)
+- [Serve over stdio or HTTP](#serve-over-stdio-or-http)
+- [How it works](#how-it-works)
+- [Roadmap](#roadmap)
+- [Development](#development)
 
 ## Quickstart
 
@@ -115,13 +47,53 @@ Register it with an AI client as a stdio MCP server, e.g. in
 ```
 
 See [`examples/billing.yaml`](examples/billing.yaml) for a full commented
-config, [`examples/billing-http.yaml`](examples/billing-http.yaml) for the
-streamable-HTTP counterpart (inbound OAuth + outbound `token_exchange`), and
-[`schema/config-v1.schema.json`](schema/config-v1.schema.json)
-(generated from the Pydantic models via `uv run python -m mcp_portal.config.schema`)
-for the schema JSON and YAML configs are validated against.
+config.
 
-## Authoring a config interactively
+## Example configuration
+
+A minimal config just needs a server and one upstream connection — no
+OpenAPI introspection or RAR policy required to get started:
+
+```yaml
+version: "1"
+mode: configured
+
+server:
+  name: billing-portal
+  transport: stdio
+
+upstreams:
+  billing:
+    base_url: https://api.example.com
+    timeout_ms: 30000
+    auth:
+      outbound:
+        mode: static
+        header: Authorization
+        scheme: Bearer
+        value: ${env:BILLING_API_KEY}   # a reference, never a literal
+```
+
+See [`examples/billing.yaml`](examples/billing.yaml) for the same upstream
+with operations, naming, and classification added.
+
+## Why mcp-portal
+
+- **Centralizes access control.** Every tool call passes through one gateway
+  and is authorized by an RAR policy before anything reaches your backend.
+- **Generates tools from OpenAPI.** Point mcp-portal at an OpenAPI 3.0/3.1
+  document and its operations become MCP tools. You don't write any tool
+  code.
+- **Exposes nothing by accident.** An operation is exposed, or exposed with
+  restrictions, only because an `x-mcp-*` extension or an explicit config
+  entry says so.
+- **Protects the model's context window.** Oversized upstream responses are
+  truncated, with a marker that says truncation happened and gives the
+  original size.
+- **Fails fast.** `validate` catches bad config, missing secrets, and policy
+  problems before the server starts, so they never surface mid-call.
+
+## Build a config interactively (`configure`)
 
 Instead of hand-writing `operations[]` and a policy file, point `configure`
 at an OpenAPI document and answer its prompts:
@@ -130,21 +102,32 @@ at an OpenAPI document and answer its prompts:
 uv run mcp-portal configure --config my-service.yaml
 ```
 
-`configure` introspects the upstream, then asks group by group whether to
-expose a set of operations — the default answer is yes, so you're
-confirming a proposal instead of typing an answer from scratch for every
-operation. Before writing anything, it shows you the diff to the config and
-to the policy file, and it only writes if you confirm.
+`configure` introspects the upstream and walks you through it group by
+group, asking whether to expose each set of operations. It proposes sensible
+defaults (the default answer is yes), so you confirm a proposal instead of
+answering every operation from scratch. Before it writes anything, it shows
+you the diff to both the config and the policy file, and it only writes if
+you confirm.
 
-Run it again later, after the upstream API has changed, and it reconciles
-instead of re-asking everything: new operations get surveyed, operations the
-upstream removed are called out by name (never silently dropped), operations
-whose shape changed get re-confirmed, and everything else is left exactly as
-you last set it.
+**Run it again after the upstream API changes** and it reconciles instead of
+re-asking everything:
 
-## Annotating backends
+- **New operations** get surveyed.
+- **Removed operations** are called out by name, never silently dropped.
+- **Changed operations** get re-confirmed.
+- **Everything else** is left exactly as you last set it.
 
-Mark an OpenAPI operation safe to expose with `x-mcp-*` extensions:
+## Turn your OpenAPI spec into tools
+
+Choose how tools are built with the `mode` setting:
+
+- **`configured`** uses only your explicit config entries.
+- **`introspect-safe`** and **`introspect-unsafe`** derive tools from a live
+  OpenAPI document (`sources/openapi.py`).
+
+Control whether and how an introspected operation is exposed with `x-mcp-*`
+extensions: `x-mcp-exclude`, `x-mcp-sensitive`, `x-mcp-name`, `x-mcp-title`,
+and `x-mcp-description`.
 
 ```yaml
 paths:
@@ -156,59 +139,91 @@ paths:
 ```
 
 An operation with no `x-mcp-*` extensions is still exposed in
-`introspect-safe`/`introspect-unsafe` mode unless excluded — use
+`introspect-safe`/`introspect-unsafe` mode unless you exclude it. Use
 `x-mcp-exclude: true` to keep it out of the tool registry entirely.
 
-## GraphQL backends
+## Control every call with RAR policy
 
-A GraphQL upstream can be introspected the same way an OpenAPI one is:
+Every call is checked against the calling principal **before the upstream is
+ever invoked**. A denied call never touches your backend.
 
-```yaml
-upstreams:
-  catalog:
-    base_url: https://api.example.com/graphql
-    introspection:
-      graphql:
-        url: https://api.example.com/graphql
-        type_policy:
-          Product: [internalNotes]
+- **Rules match operations** by `id`, `tags`, `upstream`, `effect`, and
+  `sensitivity`.
+- **Requirements add up.** Each matching rule adds its `require`d
+  `authorization_details`, and the caller must satisfy all of them.
+- **Each operation has two risk axes:**
+  - **`effect`** (`read_only` / `idempotent_write` / `action`) is derived from
+    the HTTP method and decides whether a call can be retried automatically.
+  - **`sensitivity`** (`normal` / `sensitive`) is set explicitly by
+    classification rules and is never derived.
+
+## Serve over stdio or HTTP
+
+Serve over **stdio** for local AI clients, as in the [Quickstart](#quickstart).
+Set `transport: http` to serve over the `mcp` SDK's **streamable HTTP**
+transport instead. It comes with the Origin/Host DNS-rebinding defense and
+RFC 9728 protected-resource metadata built in.
+
+See [`examples/billing-http.yaml`](examples/billing-http.yaml) for the
+streamable-HTTP counterpart of the billing example, with inbound OAuth and
+outbound `token_exchange`.
+
+## How it works
+
+```text
+AI Client  --stdio-->  mcp-portal (Gateway)  --HTTP-->  OpenAPI backend
 ```
 
-One candidate tool is generated per top-level `Query`/`Mutation` field.
-`type_policy` excludes fields from the generated field-selection by GraphQL
-type name; a cycle in the return-type graph stops descending as soon as a
-type reoccurs in its own ancestor chain, falling back to `{ __typename }`.
-Subscriptions are out of scope. `errors` in the response — even under HTTP
-200 — always fails the tool call, there is no partial-success result.
+The gateway loads a config and builds its tool registry from explicit config
+entries and/or OpenAPI introspection. For each call, it checks RAR policy,
+then forwards the call to the upstream over HTTP. The full rationale is in
+the [design spec](docs/superpowers/specs/2026-09-19-mcp-sidekit-design.md).
 
-A GraphQL operation can also be hand-authored directly in `operations[]`
-with `binding: { protocol: graphql, ... }`, giving full control over the
-document and selection set. See `examples/graphql.yaml` for a complete,
-runnable example.
+### Inbound OAuth and outbound credentials
 
-Two current limitations:
+Under `transport: http`, `auth.inbound` validates the caller's own bearer
+JWT (RFC 9068, JWKS-backed) and evaluates RAR policy against its
+`authorization_details` claim.
 
-- `configure` (the interactive CLI) does not survey or render GraphQL
-  operations — hand-author them in `operations[]` for now.
-- `base_url` must be identical to `introspection.graphql.url`. Runtime calls
-  always POST to `base_url`; if it differs from the introspection endpoint,
-  introspection succeeds at startup and every real call 404s. This is
-  enforced as a config-load error.
+An upstream configured with `outbound.mode: client_credentials` gets its own
+service credential. One configured with `outbound.mode: token_exchange`
+exchanges the caller's token (RFC 8693) for its own credential. When a
+matching rule sets `outbound.carry: true`, the credential carries only the
+policy's required detail, never the whole set the caller presented.
+
+### Secrets stay out of config and out of the model's reach
+
+- **Secrets are references.** Every secret field is a `${env:VAR}` or
+  `${file:path}` reference, never a literal.
+- **Credential headers are off-limits.** A denylist blocks bindings that
+  would let a model supply `Authorization`, `Host`, `Cookie`, or
+  `X-Forwarded-*` headers.
+
+### Config schema
+
+Configs, in JSON or YAML, are validated against
+[`schema/config-v1.schema.json`](schema/config-v1.schema.json), which is
+generated from the Pydantic models via
+`uv run python -m mcp_portal.config.schema`.
 
 ## Roadmap
 
-Not implemented yet, tracked in the [design spec](docs/superpowers/specs/2026-09-19-mcp-sidekit-design.md):
+Not implemented yet:
 
-- gRPC backend
-- Interactive `configure` support for GraphQL operations
-- JSONPath-based response filtering (byte-size truncation only today)
-- Per-call rate limiting
+- **gRPC and GraphQL backends** — HTTP/OpenAPI only today.
+- **JSONPath-based response filtering** — byte-size truncation only today.
+- **Per-call rate limiting.**
+- **Setup scripts for Claude Code, Cursor, and GitHub Copilot** — one command
+  to register mcp-portal with each client's config, instead of hand-editing
+  JSON.
 
 ## Development
 
 ```bash
-uv run pytest            # tests
-uv run ruff format .     # format
-uv run ruff check .      # lint
-uv run mypy src          # types
+uv run pytest                  # tests
+uv run pytest -m integration   # integration tests (requires Docker)
+docker buildx bake             # build all Docker images
+uv run ruff format .           # format
+uv run ruff check .            # lint
+uv run mypy src                # types
 ```

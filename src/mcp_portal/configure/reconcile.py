@@ -10,7 +10,7 @@ import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from mcp_portal.config.models import Config, HttpBindingEntry
+from mcp_portal.config.models import HttpBindingEntry, McpPortalConfig
 from mcp_portal.config.policy import PolicyConfig
 from mcp_portal.configure.decisions import OperationDecision, RequiredDetail, SurveyResult
 from mcp_portal.configure.interaction import Prompter
@@ -20,9 +20,7 @@ from mcp_portal.operations import BodySpec, Effect, HttpBinding, Operation, Para
 log = logging.getLogger("mcp_portal")
 
 
-def _require_for(
-    op_id: str, operation: Operation, policy: PolicyConfig | None
-) -> RequiredDetail | None:
+def _require_for(op_id: str, operation: Operation, policy: PolicyConfig | None) -> RequiredDetail | None:
     if policy is None:
         return None
     from mcp_portal.policy import _accumulated_details, _matching_rules
@@ -35,9 +33,7 @@ def _require_for(
     return RequiredDetail(type=first.type, actions=first.actions)
 
 
-def decisions_from_config(
-    config: Config, policy: PolicyConfig | None
-) -> dict[str, OperationDecision]:
+def decisions_from_config(config: McpPortalConfig, policy: PolicyConfig | None) -> dict[str, OperationDecision]:
     """Reconstruct the decision that must have produced each recorded
     `OperationEntry`. Every currently-configured operation is, by
     construction, exposed — an excluded operation is simply absent from
@@ -87,9 +83,7 @@ def decisions_from_config(
             effect=entry.effect or _fallback_effect(binding.method),
             sensitivity=entry.sensitivity or Sensitivity.NORMAL,
             input_schema={},
-            binding=HttpBinding(
-                method=binding.method.upper(), path=binding.path, parameters=parameters, body=body
-            ),
+            binding=HttpBinding(method=binding.method.upper(), path=binding.path, parameters=parameters, body=body),
         )
         decisions[entry.id] = OperationDecision(
             operation=operation,
@@ -120,19 +114,12 @@ def _binding_key(binding: object) -> tuple[object, ...]:
     return (
         binding.method,
         binding.path,
-        tuple(
-            (p.arg, p.location, p.wire_name, p.required, p.schema, p.style, p.explode)
-            for p in binding.parameters
-        ),
-        (binding.body.content_type, binding.body.mode, binding.body.schema)
-        if binding.body
-        else None,
+        tuple((p.arg, p.location, p.wire_name, p.required, p.schema, p.style, p.explode) for p in binding.parameters),
+        (binding.body.content_type, binding.body.mode, binding.body.schema) if binding.body else None,
     )
 
 
-def diff_operation_ids(
-    previous: dict[str, OperationDecision], current: Sequence[Operation]
-) -> ReconcileReport:
+def diff_operation_ids(previous: dict[str, OperationDecision], current: Sequence[Operation]) -> ReconcileReport:
     current_by_id = {op.id: op for op in current}
 
     new = tuple(sorted(set(current_by_id) - set(previous)))
@@ -141,16 +128,12 @@ def diff_operation_ids(
     changed: list[str] = []
     unchanged: list[str] = []
     for op_id in sorted(set(previous) & set(current_by_id)):
-        if _binding_key(previous[op_id].operation.binding) == _binding_key(
-            current_by_id[op_id].binding
-        ):
+        if _binding_key(previous[op_id].operation.binding) == _binding_key(current_by_id[op_id].binding):
             unchanged.append(op_id)
         else:
             changed.append(op_id)
 
-    return ReconcileReport(
-        new=new, removed=removed, changed=tuple(changed), unchanged=tuple(unchanged)
-    )
+    return ReconcileReport(new=new, removed=removed, changed=tuple(changed), unchanged=tuple(unchanged))
 
 
 def run_reconcile(
@@ -165,11 +148,7 @@ def run_reconcile(
 
     to_survey = [current_by_id[op_id] for op_id in (*report.new, *report.changed)]
     survey_defaults = {op_id: previous[op_id] for op_id in report.changed if op_id in previous}
-    surveyed = (
-        run_survey(to_survey, prompter, defaults=survey_defaults)
-        if to_survey
-        else SurveyResult(decisions=())
-    )
+    surveyed = run_survey(to_survey, prompter, defaults=survey_defaults) if to_survey else SurveyResult(decisions=())
 
     combined = tuple(unchanged_decisions) + surveyed.decisions
     return SurveyResult(decisions=combined, warnings=surveyed.warnings), report
