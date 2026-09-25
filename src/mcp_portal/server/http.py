@@ -171,9 +171,7 @@ def _principal_for_request(config: McpPortalConfig) -> Principal | None:
     return principal_from_access_token(access_token)
 
 
-def _build_server(
-    app: App, config: McpPortalConfig, verifier: _InboundVerifier | None
-) -> Server[None]:
+def _build_server(app: App, config: McpPortalConfig, verifier: _InboundVerifier | None) -> Server[None]:
     """The lowlevel server for the HTTP path.
 
     Deliberately not `stdio.build_server`: the SDK captures the handlers in a
@@ -181,21 +179,15 @@ def _build_server(
     afterwards, and HTTP needs one that resolves a principal per request.
     """
 
-    async def on_list_tools(
-        context: object, params: types.PaginatedRequestParams | None
-    ) -> types.ListToolsResult:
+    async def on_list_tools(context: object, params: types.PaginatedRequestParams | None) -> types.ListToolsResult:
         return types.ListToolsResult(tools=app.invoker.tools())
 
-    async def on_call_tool(
-        context: object, params: types.CallToolRequestParams
-    ) -> types.CallToolResult:
+    async def on_call_tool(context: object, params: types.CallToolRequestParams) -> types.CallToolResult:
         principal = _principal_for_request(config)
         if principal is None:
             # §10: the caller learns that it was denied, never why.
             return types.CallToolResult(
-                content=[
-                    types.TextContent(type="text", text=f"authorization denied for {params.name!r}")
-                ],
+                content=[types.TextContent(type="text", text=f"authorization denied for {params.name!r}")],
                 is_error=True,
             )
         return await app.invoker.call(params.name, params.arguments, principal=principal)
@@ -253,11 +245,7 @@ def build_http_app(app: App, config: McpPortalConfig, secrets: Mapping[str, str]
         # (`auth.inbound.enabled=true`); without one there is no
         # `AuthorizationContext` to bind to.
         stateless_http=False,
-        session_idle_timeout=(
-            http.session_idle_timeout_s
-            if http.session_idle_timeout_s is not None
-            else DEFAULT_SESSION_IDLE_TIMEOUT
-        ),
+        session_idle_timeout=(http.session_idle_timeout_s if http.session_idle_timeout_s is not None else DEFAULT_SESSION_IDLE_TIMEOUT),
         max_sessions=http.max_sessions if http.max_sessions is not None else DEFAULT_MAX_SESSIONS,
         transport_security=_security_settings(config),
         auth=_auth_settings(inbound) if verifier is not None else None,

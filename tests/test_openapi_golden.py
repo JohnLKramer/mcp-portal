@@ -37,12 +37,7 @@ def _load(name: str, **overrides) -> tuple[LoadedDocument, dict[str, Operation]]
     )
     openapi_cfg = cfg.upstreams["billing"].introspection.openapi
     loaded = load_document(openapi_cfg, FIXTURES, None, httpx.Client())
-    ops = {
-        o.id: o
-        for o in OpenApiSource(
-            "billing", loaded, include_deprecated=openapi_cfg.include_deprecated
-        ).operations()
-    }
+    ops = {o.id: o for o in OpenApiSource("billing", loaded, include_deprecated=openapi_cfg.include_deprecated).operations()}
     return loaded, ops
 
 

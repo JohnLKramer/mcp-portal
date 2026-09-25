@@ -46,10 +46,7 @@ def test_loads_json(tmp_path: Path):
 def test_loads_yaml(tmp_path: Path):
     path = tmp_path / "config.yaml"
     path.write_text(
-        "version: '1'\n"
-        "mode: configured\n"
-        "server: {name: s, transport: stdio}\n"
-        "upstreams: {billing: {base_url: 'https://api.example.com'}}\n"
+        "version: '1'\nmode: configured\nserver: {name: s, transport: stdio}\nupstreams: {billing: {base_url: 'https://api.example.com'}}\n"
     )
     assert load_config(path).config.server.name == "s"
 
@@ -134,9 +131,7 @@ def test_the_configured_static_header_is_also_denylisted(tmp_path: Path, monkeyp
         "upstreams": {
             "billing": {
                 "base_url": "https://api.example.com",
-                "auth": {
-                    "outbound": {"mode": "static", "header": "X-Api-Key", "value": "${env:K}"}
-                },
+                "auth": {"outbound": {"mode": "static", "header": "X-Api-Key", "value": "${env:K}"}},
             }
         },
         "operations": [
@@ -209,9 +204,7 @@ def test_credential_headers_for_collects_every_configured_outbound_header(
         "upstreams": {
             "billing": {
                 "base_url": "https://api.example.com",
-                "auth": {
-                    "outbound": {"mode": "static", "header": "X-Api-Key", "value": "${env:K}"}
-                },
+                "auth": {"outbound": {"mode": "static", "header": "X-Api-Key", "value": "${env:K}"}},
             }
         }
     }
@@ -251,9 +244,7 @@ def test_load_config_resolves_a_policy_file_relative_to_the_config_directory(tmp
     assert loaded.policy.defaults.unmatched == "deny"
 
 
-def test_load_config_resolves_policy_file_relative_to_config_dir_when_launched_elsewhere(
-    tmp_path: Path, monkeypatch
-):
+def test_load_config_resolves_policy_file_relative_to_config_dir_when_launched_elsewhere(tmp_path: Path, monkeypatch):
     (tmp_path / "rar-policy.yaml").write_text("version: '1'\n")
     monkeypatch.chdir(tmp_path.parent)
     loaded = load_config(write(tmp_path, MINIMAL | {"policy": {"file": "rar-policy.yaml"}}))

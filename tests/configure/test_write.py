@@ -84,11 +84,7 @@ def test_render_policy_regenerates_a_simple_type_and_actions_only_rule():
 
     simple_rule = PolicyRule(
         match=PolicyMatchSpec(ids=["create_invoice"]),
-        require=RequireConfig(
-            authorization_details=[
-                PolicyAuthDetail(type="payment_initiation", actions=["initiate"])
-            ]
-        ),
+        require=RequireConfig(authorization_details=[PolicyAuthDetail(type="payment_initiation", actions=["initiate"])]),
     )
     existing_policy = PolicyConfig(version="1", rules=[simple_rule])
 
@@ -128,9 +124,7 @@ def test_render_policy_preserves_a_rich_id_matched_rule_configure_cannot_fully_r
     )
     existing_policy = PolicyConfig(version="1", rules=[rich_rule])
 
-    decision = _decision(
-        "create_invoice", require=RequiredDetail(type="payment_initiation", actions=("initiate",))
-    )
+    decision = _decision("create_invoice", require=RequiredDetail(type="payment_initiation", actions=("initiate",)))
     rendered = render_policy([decision], existing_policy=existing_policy)
 
     # The rich rule must survive untouched — not narrowed to type+actions,
@@ -139,9 +133,7 @@ def test_render_policy_preserves_a_rich_id_matched_rule_configure_cannot_fully_r
     assert len(rendered["rules"]) == 1
     rule = rendered["rules"][0]
     assert rule["outbound"]["carry"] is True
-    assert rule["require"]["authorization_details"][0]["locations"] == [
-        "https://api.example.com/v1/payments"
-    ]
+    assert rule["require"]["authorization_details"][0]["locations"] == ["https://api.example.com/v1/payments"]
 
 
 def test_write_with_confirmation_writes_json_when_confirmed(tmp_path: Path):
@@ -171,9 +163,7 @@ def test_write_with_confirmation_round_trips_yaml_preserving_comments(tmp_path: 
     path.write_text('# a hand-written comment\nversion: "1"\nmode: configured\n')
     prompter = ScriptedPrompter(confirms=[True], texts=[])
 
-    write_with_confirmation(
-        path, {"version": "1", "mode": "configured", "extra": "field"}, prompter
-    )
+    write_with_confirmation(path, {"version": "1", "mode": "configured", "extra": "field"}, prompter)
 
     text = path.read_text()
     assert "# a hand-written comment" in text
@@ -218,9 +208,7 @@ def test_render_config_preserves_parameters_and_body():
         sensitivity=Sensitivity.NORMAL,
         require=None,
     )
-    rendered = render_config(
-        [decision], server_name="s", upstream_base_urls={"billing": "https://api.example.com"}
-    )
+    rendered = render_config([decision], server_name="s", upstream_base_urls={"billing": "https://api.example.com"})
 
     binding = rendered["operations"][0]["binding"]
     assert binding["parameters"][0]["arg"] == "id"
@@ -261,8 +249,6 @@ def test_render_config_raises_config_error_for_a_graphql_binding():
             variables=(),
         ),
     )
-    decision = OperationDecision(
-        operation=op, exposed=True, effect=op.effect, sensitivity=op.sensitivity, require=None
-    )
+    decision = OperationDecision(operation=op, exposed=True, effect=op.effect, sensitivity=op.sensitivity, require=None)
     with pytest.raises(ConfigError, match="GraphQL"):
         render_config([decision], server_name="s", upstream_base_urls={})
