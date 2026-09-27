@@ -8,6 +8,8 @@ call is authorized against an OAuth 2.0 [Rich Authorization Request](https://oau
 policy that you build interactively, before it ever reaches your API. Your
 secrets never touch the LLM.
 
+![MCP Portal Logo](img/mcp-logo-md.png)
+
 ## Table of Contents
 
 - [Quickstart](#quickstart)
