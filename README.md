@@ -2,6 +2,10 @@
 
 [Changelog](CHANGELOG.md) · [License](LICENSE) · [Contributing](CONTRIBUTING.md)
 
+[![GitHub Sponsors](https://img.shields.io/badge/Sponsor-GitHub-ea4aaa?style=for-the-badge&logo=github)](https://github.com/sponsors/JohnLKramer)
+[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black)](https://www.buymeacoffee.com/johnlkramer)
+[![Ko-fi](https://img.shields.io/badge/Ko--fi-F16061?style=for-the-badge&logo=ko-fi&logoColor=white)](https://ko-fi.com/johnlkramer)
+
 Handing an LLM raw API keys or shell access is a gamble. `mcp-portal` lets you
 give AI clients exactly the backend endpoints you choose as MCP tools. Every
 call is authorized against an OAuth 2.0 [Rich Authorization Request](https://oauth.net/2/rich-authorization-requests/)
